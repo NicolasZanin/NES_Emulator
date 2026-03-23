@@ -91,6 +91,7 @@ impl CPU {
         let opcode = self.fetch_byte();
 
         match opcode {
+            // LDA
             0xA9 => {
                 let value = self.get_operand_address(AddressingMode::Immediate) as u8;
                 self.register_a = value;
@@ -106,6 +107,8 @@ impl CPU {
                 self.register_a = self.memory.mem_read(op_address);
                 self.update_zero_and_negative_flags(self.register_a);
             },
+
+            // SDA
             0x85 => {
                 let op_address = self.get_operand_address(AddressingMode::ZeroPage);
                 self.memory.mem_write(op_address, self.register_a);
@@ -113,6 +116,18 @@ impl CPU {
             0x8D => {
                 let op_address = self.get_operand_address(AddressingMode::Absolute);
                 self.memory.mem_write(op_address, self.register_a);
+            },
+
+            // TAX
+            0xAA => {
+                self.register_x = self.register_a;
+                self.update_zero_and_negative_flags(self.register_x);
+            },
+
+            // INX
+            0xE8 => {
+                self.register_x = if self.register_x == 0xFF { 0 } else {self.register_x + 1 };
+                self.update_zero_and_negative_flags(self.register_x);
             },
             _ => panic!("This opcode is not supposed to be used."),
         }
@@ -234,6 +249,124 @@ mod tests_cpu {
         cpu.step();
 
         assert_eq!(cpu.program_counter, 0x8002);
+    }
+
+    #[test]
+    fn test_tax_transfer_a_to_x() {
+        let mut memory = Memory::new();
+        init_test_memory(&mut memory);
+
+        let mut cpu = CPU::new_mem(memory);
+
+        cpu.memory.mem_write(0x8000, 0xAA); // TAX
+
+        cpu.register_a = 0x42;
+
+        cpu.reset();
+        cpu.step();
+
+        assert_eq!(cpu.register_x, 0x42);
+    }
+
+    #[test]
+    fn test_tax_flags() {
+        let mut memory = Memory::new();
+        init_test_memory(&mut memory);
+
+        let mut cpu = CPU::new_mem(memory);
+
+        cpu.memory.mem_write(0x8000, 0xAA); // TAX
+
+        cpu.register_a = 0x00;
+
+        cpu.reset();
+        cpu.step();
+
+        assert_ne!(cpu.status & (1 << 1), 0); // Z flag
+        assert_eq!(cpu.status & (1 << 7), 0); // N flag
+
+        cpu.register_a = 0x80;
+
+        cpu.reset();
+        cpu.step();
+
+        assert_eq!(cpu.status & (1 << 1), 0);
+        assert_ne!(cpu.status & (1 << 7), 1);
+    }
+
+    #[test]
+    fn test_tax_pc_increment() {
+        let mut memory = Memory::new();
+        init_test_memory(&mut memory);
+
+        let mut cpu = CPU::new_mem(memory);
+
+        cpu.memory.mem_write(0x8000, 0xAA);
+
+        cpu.reset();
+        cpu.step();
+
+        assert_eq!(cpu.program_counter, 0x8001);
+    }
+
+    #[test]
+    fn test_inx_increment() {
+        let mut memory = Memory::new();
+        init_test_memory(&mut memory);
+
+        let mut cpu = CPU::new_mem(memory);
+
+        cpu.memory.mem_write(0x8000, 0xE8); // INX
+
+        cpu.register_x = 0x41;
+
+        cpu.reset();
+        cpu.step();
+
+        assert_eq!(cpu.register_x, 0x42);
+    }
+
+    #[test]
+    fn test_inx_overflow() {
+        let mut memory = Memory::new();
+        init_test_memory(&mut memory);
+
+        let mut cpu = CPU::new_mem(memory);
+
+        cpu.memory.mem_write(0x8000, 0xE8); // INX
+
+        cpu.register_x = 0xFF;
+
+        cpu.reset();
+        cpu.step();
+
+        assert_eq!(cpu.register_x, 0x00);
+    }
+
+    #[test]
+    fn test_inx_flags() {
+        let mut memory = Memory::new();
+        init_test_memory(&mut memory);
+
+        let mut cpu = CPU::new_mem(memory);
+
+        cpu.memory.mem_write(0x8000, 0xE8); // INX
+
+        cpu.register_x = 0xFF;
+
+        cpu.reset();
+        cpu.step();
+
+        assert_ne!(cpu.status & (1 << 1), 0); // Z flag
+        assert_eq!(cpu.status & (1 << 7), 0); // N flag
+
+        cpu.register_x = 0x7F;
+
+        cpu.reset();
+        cpu.step();
+
+        assert_eq!(cpu.status & (1 << 1), 0);
+        assert_ne!(cpu.status & (1 << 7), 0);
     }
 }
 
