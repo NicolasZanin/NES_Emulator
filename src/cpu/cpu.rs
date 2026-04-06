@@ -1,4 +1,6 @@
 use crate::cpu::memory::Memory;
+use crate::cpu::flags::Flag;
+use crate::cpu::flags::Flags;
 
 // Struct and enums
 pub struct CPU {
@@ -7,10 +9,11 @@ pub struct CPU {
     pub register_y: u8,
     pub program_counter: u16,
     pub stack_pointer: u8,
-    pub status: u8,
+    status: Flags,
     memory: Memory,
 }
 
+#[derive(Copy, Clone)]
 enum AddressingMode {
     Immediate,
     ZeroPage,
@@ -31,7 +34,7 @@ impl CPU {
             register_y: 0,
             program_counter: 0,
             stack_pointer: 0,
-            status: 0,
+            status: Flags::new(),
             memory,
         }
     }
@@ -42,7 +45,7 @@ impl CPU {
 
         let reset_byte = (high_byte << 8) | low_byte;
         self.program_counter = reset_byte;
-        self.status = 0;
+        self.status.reset();
     }
 
     pub fn fetch_byte(&mut self) -> u8 {
@@ -50,24 +53,6 @@ impl CPU {
         self.program_counter += 1;
 
         byte
-    }
-
-    fn update_zero_and_negative_flags(&mut self, result: u8) {
-        // zero flag
-        if result == 0 {
-            self.status |= 1 << 1;
-        }
-        else {
-            self.status &= !(1 << 1);
-        }
-
-        // negative flag
-        if (result >> 7) & 1 != 0  {
-            self.status |= 1 << 7;
-        }
-        else {
-            self.status &= !(1 << 7);
-        }
     }
 
     fn get_operand_address(&mut self, mode: AddressingMode) -> u16 {
@@ -87,48 +72,71 @@ impl CPU {
         }
     }
 
+    fn get_operand_value(&mut self, mode: AddressingMode) -> u8 {
+        let addr = self.get_operand_address(mode);
+
+        match mode {
+            AddressingMode::Immediate => addr as u8,
+            _ => self.memory.mem_read(addr)
+        }
+    }
+
+    // Instructions
+    fn lda(&mut self, mode: AddressingMode) {
+        let value = self.get_operand_value(mode);
+        self.register_a = value;
+        self.status.update_zero_and_negative_flags(self.register_a);
+    }
+
+    fn sda(&mut self, mode: AddressingMode) {
+        let address = self.get_operand_address(mode);
+        self.memory.mem_write(address, self.register_a);
+    }
+
+    fn tax(&mut self) {
+        self.register_x = self.register_a;
+        self.status.update_zero_and_negative_flags(self.register_x);
+    }
+
+    fn inx(&mut self) {
+        self.register_x = if self.register_x == 0xFF { 0 } else {self.register_x + 1 };
+        self.status.update_zero_and_negative_flags(self.register_x);
+    }
+
+    fn adc(&mut self) {
+        let a = self.register_a;
+        let value = self.fetch_byte();
+        let carry = if self.status.get_flag(Flag::CARRY) { 1u16 } else { 0u16 };
+
+        let sum = a as u16 + value as u16 + carry;
+        self.status.update_carry_flags(sum);
+
+
+        let result = sum as u8;
+        self.register_a = result;
+
+        self.status.update_zero_and_negative_flags(result);
+
+        let overflow = (a ^ result) & (value ^ result) & 0x80;
+        self.status.update_overflow_flags(overflow != 0);
+    }
+
     pub fn step(&mut self) {
         let opcode = self.fetch_byte();
 
         match opcode {
-            // LDA
-            0xA9 => {
-                let value = self.get_operand_address(AddressingMode::Immediate) as u8;
-                self.register_a = value;
-                self.update_zero_and_negative_flags(self.register_a);
-            },
-            0xA5 => {
-                let op_address = self.get_operand_address(AddressingMode::ZeroPage);
-                self.register_a = self.memory.mem_read(op_address);
-                self.update_zero_and_negative_flags(self.register_a);
-            },
-            0xAD => {
-                let op_address = self.get_operand_address(AddressingMode::Absolute);
-                self.register_a = self.memory.mem_read(op_address);
-                self.update_zero_and_negative_flags(self.register_a);
-            },
+            0xA9 => self.lda(AddressingMode::Immediate),
+            0xA5 => self.lda(AddressingMode::ZeroPage),
+            0xAD => self.lda(AddressingMode::Absolute),
 
-            // SDA
-            0x85 => {
-                let op_address = self.get_operand_address(AddressingMode::ZeroPage);
-                self.memory.mem_write(op_address, self.register_a);
-            },
-            0x8D => {
-                let op_address = self.get_operand_address(AddressingMode::Absolute);
-                self.memory.mem_write(op_address, self.register_a);
-            },
+            0x85 => self.sda(AddressingMode::ZeroPage),
+            0x8D => self.sda(AddressingMode::Absolute),
 
-            // TAX
-            0xAA => {
-                self.register_x = self.register_a;
-                self.update_zero_and_negative_flags(self.register_x);
-            },
+            0xAA => self.tax(),
 
-            // INX
-            0xE8 => {
-                self.register_x = if self.register_x == 0xFF { 0 } else {self.register_x + 1 };
-                self.update_zero_and_negative_flags(self.register_x);
-            },
+            0xE8 => self.inx(),
+
+            0x69 => self.adc(),
             _ => panic!("This opcode is not supposed to be used."),
         }
     }
@@ -139,6 +147,7 @@ impl CPU {
 
 #[cfg(test)]
 mod tests_cpu {
+    use crate::cpu::flags::Flag;
     use super::*;
 
     fn init_test_memory(mem: &mut Memory) {
@@ -170,8 +179,8 @@ mod tests_cpu {
 
         assert_eq!(cpu.register_a, 0x42);
 
-        assert_eq!(cpu.status & (1 << 1), 0);   // Zero flag
-        assert_eq!(cpu.status & (1 << 7), 0);   // Negative flag
+        assert!(!cpu.status.get_flag(Flag::ZERO));
+        assert!(!cpu.status.get_flag(Flag::NEGATIVE));
     }
 
     #[test]
@@ -191,8 +200,8 @@ mod tests_cpu {
         cpu.step();
 
         assert_eq!(cpu.register_a, 0x99);
-        assert_eq!(cpu.status & (1 << 1), 0);   // Zero flag
-        assert_eq!(cpu.status & (1 << 7), 1 << 7); // Negative flag if bit 7 = 1 (0x99 = 0b10011001)
+        assert!(!cpu.status.get_flag(Flag::ZERO));
+        assert!(cpu.status.get_flag(Flag::NEGATIVE));
     }
 
     #[test]
@@ -282,16 +291,16 @@ mod tests_cpu {
         cpu.reset();
         cpu.step();
 
-        assert_ne!(cpu.status & (1 << 1), 0); // Z flag
-        assert_eq!(cpu.status & (1 << 7), 0); // N flag
+        assert!(cpu.status.get_flag(Flag::ZERO));
+        assert!(!cpu.status.get_flag(Flag::NEGATIVE));
 
         cpu.register_a = 0x80;
 
         cpu.reset();
         cpu.step();
 
-        assert_eq!(cpu.status & (1 << 1), 0);
-        assert_ne!(cpu.status & (1 << 7), 1);
+        assert!(!cpu.status.get_flag(Flag::ZERO));
+        assert!(cpu.status.get_flag(Flag::NEGATIVE));
     }
 
     #[test]
@@ -357,16 +366,106 @@ mod tests_cpu {
         cpu.reset();
         cpu.step();
 
-        assert_ne!(cpu.status & (1 << 1), 0); // Z flag
-        assert_eq!(cpu.status & (1 << 7), 0); // N flag
+        assert!(cpu.status.get_flag(Flag::ZERO));
+        assert!(!cpu.status.get_flag(Flag::NEGATIVE));
 
         cpu.register_x = 0x7F;
 
         cpu.reset();
         cpu.step();
 
-        assert_eq!(cpu.status & (1 << 1), 0);
-        assert_ne!(cpu.status & (1 << 7), 0);
+        assert!(!cpu.status.get_flag(Flag::ZERO));
+        assert!(cpu.status.get_flag(Flag::NEGATIVE));
+    }
+
+    #[test]
+    fn test_adc_immediate() {
+        let mut cpu = CPU::new();
+
+        cpu.memory.mem_write(0xFFFC, 0x00);
+        cpu.memory.mem_write(0xFFFD, 0x80);
+
+        cpu.memory.mem_write(0x8000, 0x69);
+        cpu.memory.mem_write(0x8001, 0x10);
+
+        cpu.register_a = 0x20;
+
+        cpu.reset();
+        cpu.step();
+
+        assert_eq!(cpu.register_a, 0x30);
+    }
+
+    #[test]
+    fn test_adc_carry_flag() {
+        let mut cpu = CPU::new();
+
+        cpu.memory.mem_write(0xFFFC, 0x00);
+        cpu.memory.mem_write(0xFFFD, 0x80);
+
+        cpu.memory.mem_write(0x8000, 0x69);
+        cpu.memory.mem_write(0x8001, 0xFF);
+
+        cpu.register_a = 0x02;
+
+        cpu.reset();
+        cpu.step();
+
+        assert!(cpu.status.get_flag(Flag::CARRY));
+    }
+
+    #[test]
+    fn test_adc_zero_flag() {
+        let mut cpu = CPU::new();
+
+        cpu.memory.mem_write(0xFFFC, 0x00);
+        cpu.memory.mem_write(0xFFFD, 0x80);
+
+        cpu.memory.mem_write(0x8000, 0x69);
+        cpu.memory.mem_write(0x8001, 0x00);
+
+        cpu.register_a = 0x00;
+
+        cpu.reset();
+        cpu.step();
+
+        assert!(cpu.status.get_flag(Flag::ZERO));
+    }
+
+    #[test]
+    fn test_adc_negative_flag() {
+        let mut cpu = CPU::new();
+
+        cpu.memory.mem_write(0xFFFC, 0x00);
+        cpu.memory.mem_write(0xFFFD, 0x80);
+
+        cpu.memory.mem_write(0x8000, 0x69);
+        cpu.memory.mem_write(0x8001, 0x80);
+
+        cpu.register_a = 0x00;
+
+        cpu.reset();
+        cpu.step();
+
+        assert!(cpu.status.get_flag(Flag::NEGATIVE));
+    }
+
+    #[test]
+    fn test_adc_overflow_flag() {
+        let mut cpu = CPU::new();
+
+        cpu.memory.mem_write(0xFFFC, 0x00);
+        cpu.memory.mem_write(0xFFFD, 0x80);
+
+        cpu.memory.mem_write(0x8000, 0x69);
+        cpu.memory.mem_write(0x8001, 0x50);
+
+        cpu.register_a = 0x50;
+
+        cpu.reset();
+        cpu.step();
+
+        assert!(cpu.status.get_flag(Flag::OVERFLOW));
     }
 }
 
