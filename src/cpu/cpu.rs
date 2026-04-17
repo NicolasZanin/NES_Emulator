@@ -114,7 +114,7 @@ impl CPU {
         self.register_a = result;
 
         self.status.update_zero_and_negative_flags(result);
-        self.status.update_carry_flags(sum);
+        self.status.update_carry_flags(sum > 0xFF);
         self.status.update_overflow_flags(overflow != 0);
     }
 
@@ -130,6 +130,25 @@ impl CPU {
         // reverse value and remove 1 for carry
         // sbc = a - m - (1 - c) = a - m - 1 + c
         self.add_with_carry(invert);
+    }
+
+    fn compare(&mut self, mode: AddressingMode, register: u8) {
+        let value = self.get_operand_value(mode);
+
+        self.status.update_zero_and_negative_flags(register.wrapping_sub(value));
+        self.status.update_carry_flags(register >= value);
+    }
+
+    fn cmp(&mut self, mode: AddressingMode) {
+        self.compare(mode, self.register_a);
+    }
+
+    fn cpx(&mut self, mode: AddressingMode) {
+        self.compare(mode, self.register_x);
+    }
+
+    fn cpy(&mut self, mode: AddressingMode) {
+        self.compare(mode, self.register_y);
     }
 
     pub fn step(&mut self) {
@@ -154,6 +173,18 @@ impl CPU {
             0xE9 => self.sbc(AddressingMode::Immediate),
             0xE5 => self.sbc(AddressingMode::ZeroPage),
             0xED => self.sbc(AddressingMode::Absolute),
+
+            0xC9 => self.cmp(AddressingMode::Immediate),
+            0xC5 => self.cmp(AddressingMode::ZeroPage),
+            0xCD => self.cmp(AddressingMode::Absolute),
+
+            0xE0 => self.cpx(AddressingMode::Immediate),
+            0xE4 => self.cpx(AddressingMode::ZeroPage),
+            0xEC => self.cpx(AddressingMode::Absolute),
+
+            0xC0 => self.cpy(AddressingMode::Immediate),
+            0xC4 => self.cpy(AddressingMode::ZeroPage),
+            0xCC => self.cpy(AddressingMode::Absolute),
             _ => panic!("This opcode is not supposed to be used."),
         }
     }
@@ -488,7 +519,7 @@ mod tests_cpu {
         cpu.register_a = 10;
 
         cpu.reset();
-        cpu.status.update_carry_flags(0x100);
+        cpu.status.update_carry_flags(true);
 
         cpu.step();
 
@@ -525,7 +556,7 @@ mod tests_cpu {
         cpu.register_a = 5;
 
         cpu.reset();
-        cpu.status.update_carry_flags(0x100);
+        cpu.status.update_carry_flags(true);
 
         cpu.step();
 
@@ -545,7 +576,7 @@ mod tests_cpu {
         cpu.register_a = 1;
 
         cpu.reset();
-        cpu.status.update_carry_flags(0x100);
+        cpu.status.update_carry_flags(true);
 
         cpu.step();
 
@@ -565,7 +596,7 @@ mod tests_cpu {
         cpu.register_a = 10;
 
         cpu.reset();
-        cpu.status.update_carry_flags(0x100);
+        cpu.status.update_carry_flags(true);
 
         cpu.step();
 
@@ -584,11 +615,154 @@ mod tests_cpu {
         cpu.register_a = 0x80; // -128
 
         cpu.reset();
-        cpu.status.update_carry_flags(0x100);
+        cpu.status.update_carry_flags(true);
 
         cpu.step();
 
         assert!(cpu.status.get_flag(Flag::OVERFLOW));
+    }
+
+    fn setup_compare_tests(opcode: u8, operand_low: u8, operand_high: Option<u8>) -> CPU {
+        let mut memory = Memory::new();
+        init_test_memory(&mut memory);
+
+        memory.mem_write(0x8000, opcode);
+        memory.mem_write(0x8001, operand_low);
+
+        if let Some(high) = operand_high {
+            memory.mem_write(0x8002, high);
+        }
+
+        let mut cpu = CPU::new_mem(memory);
+        cpu.reset();
+        cpu
+    }
+
+    #[test]
+    fn test_cmp_equal() {
+        let mut cpu = setup_compare_tests(0xC9, 0x05, None); // CMP #$05
+        cpu.register_a = 0x05;
+
+        cpu.step();
+
+        assert!(cpu.status.get_flag(Flag::ZERO));
+        assert!(cpu.status.get_flag(Flag::CARRY));
+        assert!(!cpu.status.get_flag(Flag::NEGATIVE));
+    }
+
+    #[test]
+    fn test_cmp_more_than() {
+        let mut cpu = setup_compare_tests(0xC9, 0x03, None); // CMP #$03
+        cpu.register_a = 0x05;
+
+        cpu.step();
+
+        assert!(!cpu.status.get_flag(Flag::ZERO));
+        assert!(cpu.status.get_flag(Flag::CARRY));
+        assert!(!cpu.status.get_flag(Flag::NEGATIVE));
+    }
+
+    #[test]
+    fn test_cmp_less_than() {
+        let mut cpu = setup_compare_tests(0xC9, 0x05, None); // CMP #$05
+        cpu.register_a = 0x03;
+
+        cpu.step();
+
+        assert!(!cpu.status.get_flag(Flag::ZERO));
+        assert!(!cpu.status.get_flag(Flag::CARRY));
+        assert!(cpu.status.get_flag(Flag::NEGATIVE));
+    }
+
+    #[test]
+    fn test_cmp_zeropage() {
+        let mut cpu = setup_compare_tests(0xC5, 0x10, None); // CMP $10
+        cpu.register_a = 0x42;
+        cpu.memory.mem_write(0x0010, 0x42);
+
+        cpu.step();
+
+        assert!(cpu.status.get_flag(Flag::ZERO));
+        assert!(cpu.status.get_flag(Flag::CARRY));
+    }
+
+    #[test]
+    fn test_cmp_absolute() {
+        let mut cpu = setup_compare_tests(0xCD, 0x34, Some(0x12)); // CMP $1234
+        cpu.register_a = 0x50;
+        cpu.memory.mem_write(0x1234, 0x10);
+
+        cpu.step();
+
+        assert!(cpu.status.get_flag(Flag::CARRY));
+        assert!(!cpu.status.get_flag(Flag::ZERO));
+    }
+
+    #[test]
+    fn test_cpx_equal() {
+        let mut cpu = setup_compare_tests(0xE0, 0x08, None); // CPX #$08
+        cpu.register_x = 0x08;
+
+        cpu.step();
+
+        assert!(cpu.status.get_flag(Flag::ZERO));
+        assert!(cpu.status.get_flag(Flag::CARRY));
+    }
+
+    #[test]
+    fn test_cpx_less_than() {
+        let mut cpu = setup_compare_tests(0xE0, 0x10, None); // CPX #$10
+        cpu.register_x = 0x01;
+
+        cpu.step();
+
+        assert!(!cpu.status.get_flag(Flag::CARRY));
+        assert!(cpu.status.get_flag(Flag::NEGATIVE));
+    }
+
+    #[test]
+    fn test_cpx_zeropage() {
+        let mut cpu = setup_compare_tests(0xE4, 0x20, None); // CPX $20
+        cpu.register_x = 0x33;
+        cpu.memory.mem_write(0x0020, 0x33);
+
+        cpu.step();
+
+        assert!(cpu.status.get_flag(Flag::ZERO));
+    }
+
+    #[test]
+    fn test_cpy_equal() {
+        let mut cpu = setup_compare_tests(0xC0, 0x09, None); // CPY #$09
+        cpu.register_y = 0x09;
+
+        cpu.step();
+
+        assert!(cpu.status.get_flag(Flag::ZERO));
+        assert!(cpu.status.get_flag(Flag::CARRY));
+    }
+
+    #[test]
+    fn test_cpy_greater_than() {
+        let mut cpu = setup_compare_tests(0xC0, 0x01, None); // CPY #$01
+        cpu.register_y = 0x05;
+
+        cpu.step();
+
+        assert!(cpu.status.get_flag(Flag::CARRY));
+        assert!(!cpu.status.get_flag(Flag::ZERO));
+    }
+
+    #[test]
+    fn test_cpy_absolute() {
+        let mut cpu = setup_compare_tests(0xCC, 0x00, Some(0x20)); // CPY $2000
+        cpu.register_y = 0x01;
+        cpu.memory.mem_write(0x2000, 0x02);
+
+        cpu.step();
+
+        assert!(!cpu.status.get_flag(Flag::CARRY));
+        assert!(cpu.status.get_flag(Flag::NEGATIVE));
     }
 }
 

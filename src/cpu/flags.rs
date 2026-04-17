@@ -50,8 +50,8 @@ impl Flags {
         self.set_flag(Flag::NEGATIVE, result & Flag::NEGATIVE.bits() != 0);
     }
 
-    pub fn update_carry_flags(&mut self, result: u16) {
-        self.set_flag(Flag::CARRY, result > 0xFF);
+    pub fn update_carry_flags(&mut self, value: bool) {
+        self.set_flag(Flag::CARRY, value);
     }
 
     pub fn update_overflow_flags(&mut self, value: bool) {
