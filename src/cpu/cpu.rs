@@ -103,22 +103,33 @@ impl CPU {
         self.status.update_zero_and_negative_flags(self.register_x);
     }
 
-    fn adc(&mut self) {
+    fn add_with_carry(&mut self, value: u8) {
         let a = self.register_a;
-        let value = self.fetch_byte();
-        let carry = if self.status.get_flag(Flag::CARRY) { 1u16 } else { 0u16 };
+        let carry = self.status.get_flag(Flag::CARRY) as u16;
 
         let sum = a as u16 + value as u16 + carry;
-        self.status.update_carry_flags(sum);
-
-
         let result = sum as u8;
+        let overflow = (a ^ result) & (value ^ result) & 0x80;
+
         self.register_a = result;
 
         self.status.update_zero_and_negative_flags(result);
-
-        let overflow = (a ^ result) & (value ^ result) & 0x80;
+        self.status.update_carry_flags(sum);
         self.status.update_overflow_flags(overflow != 0);
+    }
+
+    fn adc(&mut self, mode: AddressingMode) {
+        let value = self.get_operand_value(mode);
+        self.add_with_carry(value);
+    }
+
+    fn sbc(&mut self, mode: AddressingMode) {
+        let value = self.get_operand_value(mode);
+        let invert = value.wrapping_neg().wrapping_sub(1);
+
+        // reverse value and remove 1 for carry
+        // sbc = a - m - (1 - c) = a - m - 1 + c
+        self.add_with_carry(invert);
     }
 
     pub fn step(&mut self) {
@@ -136,7 +147,13 @@ impl CPU {
 
             0xE8 => self.inx(),
 
-            0x69 => self.adc(),
+            0x69 => self.adc(AddressingMode::Immediate),
+            0x65 => self.adc(AddressingMode::ZeroPage),
+            0x6D => self.adc(AddressingMode::Absolute),
+
+            0xE9 => self.sbc(AddressingMode::Immediate),
+            0xE5 => self.sbc(AddressingMode::ZeroPage),
+            0xED => self.sbc(AddressingMode::Absolute),
             _ => panic!("This opcode is not supposed to be used."),
         }
     }
@@ -144,7 +161,6 @@ impl CPU {
 
 
 // Tests
-
 #[cfg(test)]
 mod tests_cpu {
     use crate::cpu::flags::Flag;
@@ -308,9 +324,9 @@ mod tests_cpu {
         let mut memory = Memory::new();
         init_test_memory(&mut memory);
 
-        let mut cpu = CPU::new_mem(memory);
+        memory.mem_write(0x8000, 0xAA);
 
-        cpu.memory.mem_write(0x8000, 0xAA);
+        let mut cpu = CPU::new_mem(memory);
 
         cpu.reset();
         cpu.step();
@@ -323,10 +339,9 @@ mod tests_cpu {
         let mut memory = Memory::new();
         init_test_memory(&mut memory);
 
+        memory.mem_write(0x8000, 0xE8); // INX
+
         let mut cpu = CPU::new_mem(memory);
-
-        cpu.memory.mem_write(0x8000, 0xE8); // INX
-
         cpu.register_x = 0x41;
 
         cpu.reset();
@@ -339,11 +354,9 @@ mod tests_cpu {
     fn test_inx_overflow() {
         let mut memory = Memory::new();
         init_test_memory(&mut memory);
+        memory.mem_write(0x8000, 0xE8); // INX
 
         let mut cpu = CPU::new_mem(memory);
-
-        cpu.memory.mem_write(0x8000, 0xE8); // INX
-
         cpu.register_x = 0xFF;
 
         cpu.reset();
@@ -357,10 +370,9 @@ mod tests_cpu {
         let mut memory = Memory::new();
         init_test_memory(&mut memory);
 
+        memory.mem_write(0x8000, 0xE8); // INX
+
         let mut cpu = CPU::new_mem(memory);
-
-        cpu.memory.mem_write(0x8000, 0xE8); // INX
-
         cpu.register_x = 0xFF;
 
         cpu.reset();
@@ -380,14 +392,13 @@ mod tests_cpu {
 
     #[test]
     fn test_adc_immediate() {
-        let mut cpu = CPU::new();
+        let mut memory = Memory::new();
+        init_test_memory(&mut memory);
 
-        cpu.memory.mem_write(0xFFFC, 0x00);
-        cpu.memory.mem_write(0xFFFD, 0x80);
+        memory.mem_write(0x8000, 0x69);
+        memory.mem_write(0x8001, 0x10);
 
-        cpu.memory.mem_write(0x8000, 0x69);
-        cpu.memory.mem_write(0x8001, 0x10);
-
+        let mut cpu = CPU::new_mem(memory);
         cpu.register_a = 0x20;
 
         cpu.reset();
@@ -398,14 +409,13 @@ mod tests_cpu {
 
     #[test]
     fn test_adc_carry_flag() {
-        let mut cpu = CPU::new();
+        let mut memory = Memory::new();
+        init_test_memory(&mut memory);
 
-        cpu.memory.mem_write(0xFFFC, 0x00);
-        cpu.memory.mem_write(0xFFFD, 0x80);
+        memory.mem_write(0x8000, 0x69);
+        memory.mem_write(0x8001, 0xFF);
 
-        cpu.memory.mem_write(0x8000, 0x69);
-        cpu.memory.mem_write(0x8001, 0xFF);
-
+        let mut cpu = CPU::new_mem(memory);
         cpu.register_a = 0x02;
 
         cpu.reset();
@@ -416,14 +426,13 @@ mod tests_cpu {
 
     #[test]
     fn test_adc_zero_flag() {
-        let mut cpu = CPU::new();
+        let mut memory = Memory::new();
+        init_test_memory(&mut memory);
 
-        cpu.memory.mem_write(0xFFFC, 0x00);
-        cpu.memory.mem_write(0xFFFD, 0x80);
+        memory.mem_write(0x8000, 0x69);
+        memory.mem_write(0x8001, 0x00);
 
-        cpu.memory.mem_write(0x8000, 0x69);
-        cpu.memory.mem_write(0x8001, 0x00);
-
+        let mut cpu = CPU::new_mem(memory);
         cpu.register_a = 0x00;
 
         cpu.reset();
@@ -434,14 +443,13 @@ mod tests_cpu {
 
     #[test]
     fn test_adc_negative_flag() {
-        let mut cpu = CPU::new();
+        let mut memory = Memory::new();
+        init_test_memory(&mut memory);
 
-        cpu.memory.mem_write(0xFFFC, 0x00);
-        cpu.memory.mem_write(0xFFFD, 0x80);
+        memory.mem_write(0x8000, 0x69);
+        memory.mem_write(0x8001, 0x80);
 
-        cpu.memory.mem_write(0x8000, 0x69);
-        cpu.memory.mem_write(0x8001, 0x80);
-
+        let mut cpu = CPU::new_mem(memory);
         cpu.register_a = 0x00;
 
         cpu.reset();
@@ -452,17 +460,132 @@ mod tests_cpu {
 
     #[test]
     fn test_adc_overflow_flag() {
-        let mut cpu = CPU::new();
+        let mut memory = Memory::new();
+        init_test_memory(&mut memory);
 
-        cpu.memory.mem_write(0xFFFC, 0x00);
-        cpu.memory.mem_write(0xFFFD, 0x80);
+        memory.mem_write(0x8000, 0x69);
+        memory.mem_write(0x8001, 0x50);
 
-        cpu.memory.mem_write(0x8000, 0x69);
-        cpu.memory.mem_write(0x8001, 0x50);
-
+        let mut cpu = CPU::new_mem(memory);
         cpu.register_a = 0x50;
 
         cpu.reset();
+        cpu.step();
+
+        assert!(cpu.status.get_flag(Flag::OVERFLOW));
+    }
+
+    #[test]
+    fn test_sbc_immediate_basic() {
+        let mut memory = Memory::new();
+        init_test_memory(&mut memory);
+
+        memory.mem_write(0x8000, 0xE9); // SBC #$03
+        memory.mem_write(0x8001, 0x03);
+
+        let mut cpu = CPU::new_mem(memory);
+
+        cpu.register_a = 10;
+
+        cpu.reset();
+        cpu.status.update_carry_flags(0x100);
+
+        cpu.step();
+
+        assert_eq!(cpu.register_a, 7);
+    }
+
+    #[test]
+    fn test_sbc_no_carry_flag() {
+        let mut memory = Memory::new();
+        init_test_memory(&mut memory);
+
+        memory.mem_write(0x8000, 0xE9);
+        memory.mem_write(0x8001, 0x03);
+
+        let mut cpu = CPU::new_mem(memory);
+
+        cpu.register_a = 10;
+
+        cpu.reset();
+        cpu.step();
+
+        assert_eq!(cpu.register_a, 6);
+    }
+
+    #[test]
+    fn test_sbc_zero_flag() {
+        let mut memory = Memory::new();
+        init_test_memory(&mut memory);
+
+        memory.mem_write(0x8000, 0xE9);
+        memory.mem_write(0x8001, 0x05);
+
+        let mut cpu = CPU::new_mem(memory);
+        cpu.register_a = 5;
+
+        cpu.reset();
+        cpu.status.update_carry_flags(0x100);
+
+        cpu.step();
+
+        assert_eq!(cpu.register_a, 0);
+        assert!(cpu.status.get_flag(Flag::ZERO));
+    }
+
+    #[test]
+    fn test_sbc_negative_flag() {
+        let mut memory = Memory::new();
+        init_test_memory(&mut memory);
+
+        memory.mem_write(0x8000, 0xE9);
+        memory.mem_write(0x8001, 0x02);
+
+        let mut cpu = CPU::new_mem(memory);
+        cpu.register_a = 1;
+
+        cpu.reset();
+        cpu.status.update_carry_flags(0x100);
+
+        cpu.step();
+
+        assert_eq!(cpu.register_a, 0xFF);
+        assert!(cpu.status.get_flag(Flag::NEGATIVE));
+    }
+
+    #[test]
+    fn test_sbc_carry_with_carry_flags() {
+        let mut memory = Memory::new();
+        init_test_memory(&mut memory);
+
+        memory.mem_write(0x8000, 0xE9);
+        memory.mem_write(0x8001, 0x03);
+
+        let mut cpu = CPU::new_mem(memory);
+        cpu.register_a = 10;
+
+        cpu.reset();
+        cpu.status.update_carry_flags(0x100);
+
+        cpu.step();
+
+        assert!(cpu.status.get_flag(Flag::CARRY));
+    }
+
+    #[test]
+    fn test_sbc_overflow() {
+        let mut memory = Memory::new();
+        init_test_memory(&mut memory);
+
+        memory.mem_write(0x8000, 0xE9);
+        memory.mem_write(0x8001, 0x01);
+
+        let mut cpu = CPU::new_mem(memory);
+        cpu.register_a = 0x80; // -128
+
+        cpu.reset();
+        cpu.status.update_carry_flags(0x100);
+
         cpu.step();
 
         assert!(cpu.status.get_flag(Flag::OVERFLOW));
