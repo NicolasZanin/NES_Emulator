@@ -1,6 +1,6 @@
-use crate::cpu::memory::Memory;
 use crate::cpu::flags::Flag;
 use crate::cpu::flags::Flags;
+use crate::cpu::memory::Memory;
 
 // Struct and enums
 pub struct CPU {
@@ -18,6 +18,7 @@ enum AddressingMode {
     Immediate,
     ZeroPage,
     Absolute,
+    Indirect,
 }
 
 // Implementation
@@ -55,19 +56,28 @@ impl CPU {
         byte
     }
 
+    fn read_from_pc(&mut self) -> u16 {
+        let low_byte = self.fetch_byte() as u16;
+        let high_byte = self.fetch_byte() as u16;
+
+        (high_byte << 8) | low_byte
+    }
+
+    fn read_from_memory(&mut self, addr: u16) -> u16 {
+        let low_byte = self.memory.mem_read(addr) as u16;
+        let high_byte = self.memory.mem_read(addr + 1) as u16;
+
+        (high_byte << 8) | low_byte
+    }
+
     fn get_operand_address(&mut self, mode: AddressingMode) -> u16 {
         match mode {
-            AddressingMode::Immediate => {
-                self.fetch_byte() as u16
-            },
-            AddressingMode::ZeroPage => {
-                self.fetch_byte() as u16
-            },
-            AddressingMode::Absolute => {
-                let low_byte = self.fetch_byte() as u16;
-                let high_byte = self.fetch_byte() as u16;
-
-                (high_byte << 8) | low_byte
+            AddressingMode::Immediate => self.fetch_byte() as u16,
+            AddressingMode::ZeroPage => self.fetch_byte() as u16,
+            AddressingMode::Absolute => self.read_from_pc(),
+            AddressingMode::Indirect => {
+                let address_target = self.read_from_pc();
+                self.read_from_memory(address_target)
             }
         }
     }
@@ -77,7 +87,7 @@ impl CPU {
 
         match mode {
             AddressingMode::Immediate => addr as u8,
-            _ => self.memory.mem_read(addr)
+            _ => self.memory.mem_read(addr),
         }
     }
 
@@ -99,7 +109,11 @@ impl CPU {
     }
 
     fn inx(&mut self) {
-        self.register_x = if self.register_x == 0xFF { 0 } else {self.register_x + 1 };
+        self.register_x = if self.register_x == 0xFF {
+            0
+        } else {
+            self.register_x + 1
+        };
         self.status.update_zero_and_negative_flags(self.register_x);
     }
 
@@ -135,7 +149,8 @@ impl CPU {
     fn compare(&mut self, mode: AddressingMode, register: u8) {
         let value = self.get_operand_value(mode);
 
-        self.status.update_zero_and_negative_flags(register.wrapping_sub(value));
+        self.status
+            .update_zero_and_negative_flags(register.wrapping_sub(value));
         self.status.update_carry_flags(register >= value);
     }
 
@@ -149,6 +164,10 @@ impl CPU {
 
     fn cpy(&mut self, mode: AddressingMode) {
         self.compare(mode, self.register_y);
+    }
+
+    fn jmp(&mut self, mode: AddressingMode) {
+        self.program_counter = self.get_operand_address(mode);
     }
 
     pub fn step(&mut self) {
@@ -185,17 +204,19 @@ impl CPU {
             0xC0 => self.cpy(AddressingMode::Immediate),
             0xC4 => self.cpy(AddressingMode::ZeroPage),
             0xCC => self.cpy(AddressingMode::Absolute),
+
+            0x4C => self.jmp(AddressingMode::Absolute),
+            0x6C => self.jmp(AddressingMode::Indirect),
             _ => panic!("This opcode is not supposed to be used."),
         }
     }
 }
 
-
 // Tests
 #[cfg(test)]
 mod tests_cpu {
-    use crate::cpu::flags::Flag;
     use super::*;
+    use crate::cpu::flags::Flag;
 
     fn init_test_memory(mem: &mut Memory) {
         mem.mem_write(0xFFFC, 0x00);
@@ -764,5 +785,60 @@ mod tests_cpu {
         assert!(!cpu.status.get_flag(Flag::CARRY));
         assert!(cpu.status.get_flag(Flag::NEGATIVE));
     }
-}
 
+    #[test]
+    fn test_jmp_absolute() {
+        let mut memory = Memory::new();
+        init_test_memory(&mut memory);
+
+        memory.mem_write(0x8000, 0x4C); // JMP Absolute
+        memory.mem_write(0x8001, 0x34); // low
+        memory.mem_write(0x8002, 0x12); // high
+
+        let mut cpu = CPU::new_mem(memory);
+        cpu.reset();
+        cpu.step();
+
+        assert_eq!(cpu.program_counter, 0x1234);
+    }
+
+    #[test]
+    fn test_jmp_indirect() {
+        let mut memory = Memory::new();
+        init_test_memory(&mut memory);
+
+        memory.mem_write(0x8000, 0x6C); // JMP Indirect
+        memory.mem_write(0x8001, 0x00); // pointer low
+        memory.mem_write(0x8002, 0x20); // pointer high
+
+        // pointer = $2000
+        memory.mem_write(0x2000, 0x78); // low target
+        memory.mem_write(0x2001, 0x56); // high target
+
+        let mut cpu = CPU::new_mem(memory);
+        cpu.reset();
+        cpu.step();
+
+        assert_eq!(cpu.program_counter, 0x5678);
+    }
+
+    #[test]
+    fn test_jmp_chain_execution() {
+        let mut memory = Memory::new();
+        init_test_memory(&mut memory);
+
+        memory.mem_write(0x8000, 0x4C); // JMP $9000
+        memory.mem_write(0x8001, 0x00);
+        memory.mem_write(0x8002, 0x90);
+
+        memory.mem_write(0x9000, 0xA9); // LDA #$42
+        memory.mem_write(0x9001, 0x42);
+
+        let mut cpu = CPU::new_mem(memory);
+        cpu.reset();
+        cpu.step(); // jump
+        cpu.step(); // lda
+
+        assert_eq!(cpu.register_a, 0x42);
+    }
+}
