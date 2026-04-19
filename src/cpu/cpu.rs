@@ -170,6 +170,47 @@ impl CPU {
         self.program_counter = self.get_operand_address(mode);
     }
 
+    fn branch(&mut self, flag: Flag, is_set: bool) {
+        // change u8 in i8 to cast in negative or positive number
+        let jump_address = self.fetch_byte() as i8 as i16;
+
+        if self.status.get_flag(flag) == is_set {
+            self.program_counter = self.program_counter.wrapping_add_signed(jump_address);
+        }
+    }
+
+    fn beq(&mut self) {
+        self.branch(Flag::ZERO, true);
+    }
+
+    fn bne(&mut self) {
+        self.branch(Flag::ZERO, false);
+    }
+
+    fn bcc(&mut self) {
+        self.branch(Flag::CARRY, false);
+    }
+
+    fn bcs(&mut self) {
+        self.branch(Flag::CARRY, true);
+    }
+
+    fn bvc(&mut self) {
+        self.branch(Flag::OVERFLOW, false);
+    }
+
+    fn bvs(&mut self) {
+        self.branch(Flag::OVERFLOW, true);
+    }
+
+    fn bmi(&mut self) {
+        self.branch(Flag::NEGATIVE, true);
+    }
+
+    fn bpl(&mut self) {
+        self.branch(Flag::NEGATIVE, false);
+    }
+
     pub fn step(&mut self) {
         let opcode = self.fetch_byte();
 
@@ -207,6 +248,17 @@ impl CPU {
 
             0x4C => self.jmp(AddressingMode::Absolute),
             0x6C => self.jmp(AddressingMode::Indirect),
+
+            // Branching
+            0xF0 => self.beq(),
+            0xD0 => self.bne(),
+            0x90 => self.bcc(),
+            0xB0 => self.bcs(),
+            0x50 => self.bvc(),
+            0x70 => self.bvs(),
+            0x30 => self.bmi(),
+            0x10 => self.bpl(),
+
             _ => panic!("This opcode is not supposed to be used."),
         }
     }
@@ -840,5 +892,156 @@ mod tests_cpu {
         cpu.step(); // lda
 
         assert_eq!(cpu.register_a, 0x42);
+    }
+
+    fn setup_branching_test(opcode: u8, offset: u8) -> CPU {
+        let mut mem = Memory::new();
+        init_test_memory(&mut mem);
+
+        mem.mem_write(0x8000, opcode);
+        mem.mem_write(0x8001, offset);
+
+        let mut cpu = CPU::new_mem(mem);
+        cpu.reset();
+        cpu
+    }
+
+    #[test]
+    fn test_beq_taken_forward() {
+        let mut cpu = setup_branching_test(0xF0, 0x05);
+        cpu.status.set_flag(Flag::ZERO, true);
+
+        cpu.step();
+
+        assert_eq!(cpu.program_counter, 0x8007);
+    }
+
+    #[test]
+    fn test_beq_not_taken() {
+        let mut cpu = setup_branching_test(0xF0, 0x05);
+        cpu.status.set_flag(Flag::ZERO, false);
+
+        cpu.step();
+
+        assert_eq!(cpu.program_counter, 0x8002);
+    }
+
+    #[test]
+    fn test_bne_taken_backward() {
+        let mut cpu = setup_branching_test(0xD0, 0xFB); // -5
+        cpu.status.set_flag(Flag::ZERO, false);
+
+        cpu.step();
+
+        assert_eq!(cpu.program_counter, 0x7FFD);
+    }
+
+    #[test]
+    fn test_bne_not_taken() {
+        let mut cpu = setup_branching_test(0xD0, 0x05);
+        cpu.status.set_flag(Flag::ZERO, true);
+
+        cpu.step();
+
+        assert_eq!(cpu.program_counter, 0x8002);
+    }
+
+    #[test]
+    fn test_bcc_taken() {
+        let mut cpu = setup_branching_test(0x90, 0x04);
+        cpu.status.set_flag(Flag::CARRY, false);
+
+        cpu.step();
+
+        assert_eq!(cpu.program_counter, 0x8006);
+    }
+
+    #[test]
+    fn test_bcc_not_taken() {
+        let mut cpu = setup_branching_test(0x90, 0x04);
+        cpu.status.set_flag(Flag::CARRY, true);
+
+        cpu.step();
+
+        assert_eq!(cpu.program_counter, 0x8002);
+    }
+
+    #[test]
+    fn test_bcs_taken() {
+        let mut cpu = setup_branching_test(0xB0, 0x02);
+        cpu.status.set_flag(Flag::CARRY, true);
+
+        cpu.step();
+
+        assert_eq!(cpu.program_counter, 0x8004);
+    }
+
+    #[test]
+    fn test_bcs_not_taken() {
+        let mut cpu = setup_branching_test(0xB0, 0x02);
+        cpu.status.set_flag(Flag::CARRY, false);
+
+        cpu.step();
+
+        assert_eq!(cpu.program_counter, 0x8002);
+    }
+
+    #[test]
+    fn test_bvc_taken() {
+        let mut cpu = setup_branching_test(0x50, 0x06);
+        cpu.status.set_flag(Flag::OVERFLOW, false);
+
+        cpu.step();
+
+        assert_eq!(cpu.program_counter, 0x8008);
+    }
+
+    #[test]
+    fn test_bvc_not_taken() {
+        let mut cpu = setup_branching_test(0x50, 0x06);
+        cpu.status.set_flag(Flag::OVERFLOW, true);
+
+        cpu.step();
+
+        assert_eq!(cpu.program_counter, 0x8002);
+    }
+
+    #[test]
+    fn test_bvs_taken() {
+        let mut cpu = setup_branching_test(0x70, 0x01);
+        cpu.status.set_flag(Flag::OVERFLOW, true);
+
+        cpu.step();
+
+        assert_eq!(cpu.program_counter, 0x8003);
+    }
+
+    #[test]
+    fn test_bvs_not_taken() {
+        let mut cpu = setup_branching_test(0x70, 0x01);
+        cpu.status.set_flag(Flag::OVERFLOW, false);
+
+        cpu.step();
+
+        assert_eq!(cpu.program_counter, 0x8002);
+    }
+    #[test]
+    fn test_branch_zero_offset() {
+        let mut cpu = setup_branching_test(0xF0, 0x00);
+        cpu.status.set_flag(Flag::ZERO, true);
+
+        cpu.step();
+
+        assert_eq!(cpu.program_counter, 0x8002);
+    }
+
+    #[test]
+    fn test_branch_negative_one() {
+        let mut cpu = setup_branching_test(0xD0, 0xFF); // -1
+        cpu.status.set_flag(Flag::ZERO, false);
+
+        cpu.step();
+
+        assert_eq!(cpu.program_counter, 0x8001);
     }
 }

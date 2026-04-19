@@ -32,7 +32,7 @@ impl Flags {
         self.status
     }
 
-    fn set_flag(&mut self, flag: Flag, value: bool) {
+    pub fn set_flag(&mut self, flag: Flag, value: bool) {
         if value {
             self.status |= flag.bits();
         }
