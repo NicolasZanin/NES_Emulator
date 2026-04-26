@@ -21,6 +21,8 @@ enum AddressingMode {
     Indirect,
 }
 
+const ADDRESS_STACK: u16 = 0x0100;
+
 // Implementation
 
 impl CPU {
@@ -211,6 +213,38 @@ impl CPU {
         self.branch(Flag::NEGATIVE, false);
     }
 
+    fn write_value_sp(&mut self, value: u8) {
+        let address_to_store_value = ADDRESS_STACK + self.stack_pointer as u16;
+        self.memory.mem_write(address_to_store_value, value);
+        self.stack_pointer -= 1;
+    }
+
+    fn read_value_sp(&mut self) -> u8 {
+        self.stack_pointer += 1;
+        let address_to_get_value = ADDRESS_STACK + self.stack_pointer as u16;
+
+        self.memory.mem_read(address_to_get_value)
+    }
+
+    fn pha(&mut self) {
+        self.write_value_sp(self.register_a);
+    }
+
+    fn pla(&mut self) {
+        self.register_a = self.read_value_sp();
+        self.status.update_zero_and_negative_flags(self.register_a);
+    }
+
+    fn php(&mut self) {
+        let status = self.status.get_status();
+        self.write_value_sp(status);
+    }
+
+    fn plp(&mut self) {
+        let stored_status = self.read_value_sp();
+        self.status.set_status(stored_status);
+    }
+
     pub fn step(&mut self) {
         let opcode = self.fetch_byte();
 
@@ -258,6 +292,11 @@ impl CPU {
             0x70 => self.bvs(),
             0x30 => self.bmi(),
             0x10 => self.bpl(),
+
+            0x48 => self.pha(),
+            0x68 => self.pla(),
+            0x08 => self.php(),
+            0x28 => self.plp(),
 
             _ => panic!("This opcode is not supposed to be used."),
         }
@@ -1043,5 +1082,113 @@ mod tests_cpu {
         cpu.step();
 
         assert_eq!(cpu.program_counter, 0x8001);
+    }
+
+    fn setup_stack_instruction(opcode: u8) -> CPU {
+        let mut mem = Memory::new();
+        init_test_memory(&mut mem);
+
+        mem.mem_write(0x8000, opcode);
+
+        let mut cpu = CPU::new_mem(mem);
+        cpu.reset();
+        cpu.stack_pointer = 0xFF;
+        cpu
+    }
+
+
+    #[test]
+    fn test_pha_pushes_a_to_stack() {
+        let mut cpu = setup_stack_instruction(0x48); // PHA
+        cpu.register_a = 0x42;
+
+        cpu.step();
+
+        let addr = ADDRESS_STACK + 0xFF;
+        assert_eq!(cpu.memory.mem_read(addr), 0x42);
+        assert_eq!(cpu.stack_pointer, 0xFE);
+    }
+
+    #[test]
+    fn test_pla_pulls_value_from_stack() {
+        let mut cpu = setup_stack_instruction(0x68); // PLA
+
+        cpu.memory.mem_write(0x01FF, 0x37);
+        cpu.stack_pointer = 0xFE;
+
+        cpu.step();
+
+        assert_eq!(cpu.register_a, 0x37);
+        assert_eq!(cpu.stack_pointer, 0xFF);
+    }
+
+    #[test]
+    fn test_pla_sets_zero_flag() {
+        let mut cpu = setup_stack_instruction(0x68);
+
+        cpu.memory.mem_write(0x01FF, 0x00);
+        cpu.stack_pointer = 0xFE;
+
+        cpu.step();
+
+        assert!(cpu.status.get_flag(Flag::ZERO));
+    }
+
+    #[test]
+    fn test_pla_sets_negative_flag() {
+        let mut cpu = setup_stack_instruction(0x68);
+
+        cpu.memory.mem_write(0x01FF, 0x80);
+        cpu.stack_pointer = 0xFE;
+
+        cpu.step();
+
+        assert!(cpu.status.get_flag(Flag::NEGATIVE));
+    }
+
+    #[test]
+    fn test_php_pushes_status() {
+        let mut cpu = setup_stack_instruction(0x08); // PHP
+        cpu.status.set_flag(Flag::CARRY, true);
+
+        cpu.step();
+
+        let addr = ADDRESS_STACK + 0xFF;
+        assert_eq!(cpu.memory.mem_read(addr), cpu.status.get_status());
+        assert_eq!(cpu.stack_pointer, 0xFE);
+    }
+
+    #[test]
+    fn test_plp_pulls_status() {
+        let mut cpu = setup_stack_instruction(0x28); // PLP
+
+        cpu.memory.mem_write(0x01FF, 0b00000001);
+        cpu.stack_pointer = 0xFE;
+
+        cpu.step();
+
+        assert!(cpu.status.get_flag(Flag::CARRY));
+        assert_eq!(cpu.stack_pointer, 0xFF);
+    }
+
+    #[test]
+    fn test_stack_lifo_behavior() {
+        let mut cpu = setup_stack_instruction(0x48); // PHA
+        cpu.memory.mem_write(0x8001, 0x48);
+        cpu.memory.mem_write(0x8002, 0x68);
+        cpu.memory.mem_write(0x8003, 0x68);
+
+        cpu.register_a = 0xAA;
+        cpu.step();
+
+        cpu.register_a = 0xBB;
+        cpu.step();
+
+        // simulate PLA
+        cpu.step();
+        assert_eq!(cpu.register_a, 0xBB);
+
+        cpu.step();
+        assert_eq!(cpu.register_a, 0xAA);
     }
 }
