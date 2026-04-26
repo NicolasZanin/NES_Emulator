@@ -36,7 +36,7 @@ impl CPU {
             register_x: 0,
             register_y: 0,
             program_counter: 0,
-            stack_pointer: 0,
+            stack_pointer: 0xFF,
             status: Flags::new(),
             memory,
         }
@@ -70,6 +70,31 @@ impl CPU {
         let high_byte = self.memory.mem_read(addr + 1) as u16;
 
         (high_byte << 8) | low_byte
+    }
+
+    fn write_value_sp(&mut self, value: u8) {
+        let address_to_store_value = ADDRESS_STACK + self.stack_pointer as u16;
+        self.memory.mem_write(address_to_store_value, value);
+        self.stack_pointer -= 1;
+    }
+
+    fn read_value_sp(&mut self) -> u8 {
+        self.stack_pointer += 1;
+        let address_to_get_value = ADDRESS_STACK + self.stack_pointer as u16;
+
+        self.memory.mem_read(address_to_get_value)
+    }
+
+    fn read_from_stack(&mut self) -> u16 {
+        let low_byte = self.read_value_sp() as u16;
+        let high_byte = self.read_value_sp() as u16;
+
+        (high_byte << 8) | low_byte
+    }
+
+    fn write_in_stack(&mut self, addr: u16) {
+        self.write_value_sp((addr >> 8) as u8 );
+        self.write_value_sp(addr as u8);
     }
 
     fn get_operand_address(&mut self, mode: AddressingMode) -> u16 {
@@ -213,18 +238,6 @@ impl CPU {
         self.branch(Flag::NEGATIVE, false);
     }
 
-    fn write_value_sp(&mut self, value: u8) {
-        let address_to_store_value = ADDRESS_STACK + self.stack_pointer as u16;
-        self.memory.mem_write(address_to_store_value, value);
-        self.stack_pointer -= 1;
-    }
-
-    fn read_value_sp(&mut self) -> u8 {
-        self.stack_pointer += 1;
-        let address_to_get_value = ADDRESS_STACK + self.stack_pointer as u16;
-
-        self.memory.mem_read(address_to_get_value)
-    }
 
     fn pha(&mut self) {
         self.write_value_sp(self.register_a);
@@ -243,6 +256,18 @@ impl CPU {
     fn plp(&mut self) {
         let stored_status = self.read_value_sp();
         self.status.set_status(stored_status);
+    }
+
+    fn jsr(&mut self) {
+        let address = self.read_from_pc();
+        self.write_in_stack(self.program_counter - 1);
+
+        self.program_counter = address;
+    }
+
+    fn rts(&mut self) {
+        let address = self.read_from_stack() + 1; // last PC + 1
+        self.program_counter = address;
     }
 
     pub fn step(&mut self) {
@@ -293,10 +318,13 @@ impl CPU {
             0x30 => self.bmi(),
             0x10 => self.bpl(),
 
+            // Stack
             0x48 => self.pha(),
             0x68 => self.pla(),
             0x08 => self.php(),
             0x28 => self.plp(),
+            0x20 => self.jsr(),
+            0x60 => self.rts(),
 
             _ => panic!("This opcode is not supposed to be used."),
         }
@@ -1190,5 +1218,110 @@ mod tests_cpu {
 
         cpu.step();
         assert_eq!(cpu.register_a, 0xAA);
+    }
+
+    #[test]
+    fn test_jsr_jumps_to_target_address() {
+        let mut cpu = setup_stack_instruction(0x20);
+
+        // JSR $1234
+        cpu.memory.mem_write(0x8001, 0x34);
+        cpu.memory.mem_write(0x8002, 0x12);
+
+        cpu.step();
+
+        assert_eq!(cpu.program_counter, 0x1234);
+    }
+
+    #[test]
+    fn test_jsr_pushes_return_address_on_stack() {
+        let mut cpu = setup_stack_instruction(0x20);
+
+        cpu.memory.mem_write(0x8001, 0x00);
+        cpu.memory.mem_write(0x8002, 0x90);
+
+        cpu.step();
+
+        // Return address = PC - 1 = 0x8002
+        assert_eq!(cpu.memory.mem_read(0x01FF), 0x80); // high byte
+        assert_eq!(cpu.memory.mem_read(0x01FE), 0x02); // low byte
+
+        assert_eq!(cpu.stack_pointer, 0xFD);
+    }
+
+    #[test]
+    fn test_multiple_jsr_stack_growth() {
+        let mut cpu = setup_stack_instruction(0x20);
+
+        // First JSR
+        cpu.memory.mem_write(0x8001, 0x00);
+        cpu.memory.mem_write(0x8002, 0x90);
+
+        cpu.step();
+
+        // Simulate second JSR at new location
+        cpu.memory.mem_write(0x9000, 0x20);
+        cpu.memory.mem_write(0x9001, 0x00);
+        cpu.memory.mem_write(0x9002, 0xA0);
+
+        cpu.step();
+
+        assert_eq!(cpu.stack_pointer, 0xFB);
+    }
+
+    fn setup_rts_instruction() -> CPU {
+        let mut cpu = setup_stack_instruction(0x60);
+        cpu.stack_pointer = 0xFD;
+
+        cpu
+    }
+
+    #[test]
+    fn test_rts_returns_to_correct_address() {
+        let mut cpu = setup_rts_instruction();
+
+        // Simulate stack containing return address 0x8002
+        cpu.memory.mem_write(0x01FE, 0x02); // low
+        cpu.memory.mem_write(0x01FF, 0x80); // high
+
+        cpu.step();
+
+        assert_eq!(cpu.program_counter, 0x8003);
+    }
+
+
+    #[test]
+    fn test_rts_restores_stack_pointer() {
+        let mut cpu = setup_rts_instruction();
+
+        cpu.memory.mem_write(0x01FE, 0x00);
+        cpu.memory.mem_write(0x01FF, 0x90);
+
+        cpu.step();
+
+        assert_eq!(cpu.stack_pointer, 0xFF);
+    }
+
+    #[test]
+    fn test_jsr_rts_full_cycle() {
+        let mut mem = Memory::new();
+        init_test_memory(&mut mem);
+
+        // JSR $9000
+        mem.mem_write(0x8000, 0x20);
+        mem.mem_write(0x8001, 0x00);
+        mem.mem_write(0x8002, 0x90);
+
+        // RTS at $9000
+        mem.mem_write(0x9000, 0x60);
+
+        let mut cpu = CPU::new_mem(mem);
+        cpu.reset();
+        cpu.stack_pointer = 0xFF;
+
+        cpu.step(); // JSR
+        cpu.step(); // RTS
+
+        assert_eq!(cpu.program_counter, 0x8003);
     }
 }
