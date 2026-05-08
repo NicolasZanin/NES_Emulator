@@ -270,6 +270,23 @@ impl CPU {
         self.program_counter = address;
     }
 
+    fn brk(&mut self) {
+        self.write_in_stack(self.program_counter);
+
+        self.status.set_flag(Flag::BREAK, true);
+        self.write_value_sp(self.status.get_status());
+
+        self.program_counter = self.read_from_memory(0xFFFE);
+    }
+
+    fn rti(&mut self) {
+        let status = self.read_value_sp();
+        let previous_address = self.read_from_stack();
+
+        self.status.set_status(status);
+        self.program_counter = previous_address;
+    }
+
     pub fn step(&mut self) {
         let opcode = self.fetch_byte();
 
@@ -325,6 +342,9 @@ impl CPU {
             0x28 => self.plp(),
             0x20 => self.jsr(),
             0x60 => self.rts(),
+
+            0x00 => self.brk(),
+            0x40 => self.rti(),
 
             _ => panic!("This opcode is not supposed to be used."),
         }
@@ -1323,5 +1343,62 @@ mod tests_cpu {
         cpu.step(); // RTS
 
         assert_eq!(cpu.program_counter, 0x8003);
+    }
+
+    #[test]
+    fn test_brk_pushes_pc_and_status() {
+        let mut cpu = setup_stack_instruction(0x00); // BRK
+
+        cpu.memory.mem_write(0x8000, 0x00);
+
+        cpu.memory.mem_write(0xFFFE, 0x00);
+        cpu.memory.mem_write(0xFFFF, 0x90);
+        cpu.step();
+
+        // PC + 1 = 0x8001
+        assert_eq!(cpu.memory.mem_read(0x01FF), 0x80);
+        assert_eq!(cpu.memory.mem_read(0x01FE), 0x01);
+
+        assert_eq!(cpu.stack_pointer, 0xFC);
+        assert_eq!(cpu.program_counter, 0x9000);
+    }
+
+    #[test]
+    fn test_rti_restores_pc_and_status() {
+        let mut cpu = setup_stack_instruction(0x40); // RTI
+
+        // status
+        cpu.memory.mem_write(0x01FD, 0b00000001);
+
+        // PC = 0x8005
+        cpu.memory.mem_write(0x01FE, 0x05);
+        cpu.memory.mem_write(0x01FF, 0x80);
+
+        cpu.stack_pointer = 0xFC;
+        cpu.step();
+
+        assert_eq!(cpu.program_counter, 0x8005);
+        assert!(cpu.status.get_flag(Flag::CARRY));
+    }
+
+    #[test]
+    fn test_brk_rti_cycle() {
+        let mut mem = Memory::new();
+        init_test_memory(&mut mem);
+
+        mem.mem_write(0x8000, 0x00); // BRK
+        mem.mem_write(0x9000, 0x40); // RTI
+
+        mem.mem_write(0xFFFE, 0x00);
+        mem.mem_write(0xFFFF, 0x90);
+
+        let mut cpu = CPU::new_mem(mem);
+        cpu.reset();
+        cpu.stack_pointer = 0xFF;
+
+        cpu.step(); // BRK
+        cpu.step(); // RTI
+
+        assert_eq!(cpu.program_counter, 0x8001);
     }
 }
