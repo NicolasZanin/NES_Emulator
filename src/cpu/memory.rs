@@ -16,3 +16,17 @@ impl Memory {
         self.memory[addr as usize] = data;
     }
 }
+
+#[cfg(test)]
+impl Memory {
+    pub fn load_program(&mut self, program: &[u8]) {
+        let start = 0x8000;
+
+        for (i, byte) in program.iter().enumerate() {
+            self.mem_write(start + i as u16, *byte);
+        }
+
+        self.mem_write(0xFFFC, 0x00);
+        self.mem_write(0xFFFD, 0x80);
+    }
+}

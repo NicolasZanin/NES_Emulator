@@ -1,6 +1,8 @@
+use std::iter::Map;
 use crate::cpu::flags::Flag;
 use crate::cpu::flags::Flags;
 use crate::cpu::memory::Memory;
+use crate::cpu::stack::Stack;
 
 // Struct and enums
 pub struct CPU {
@@ -8,7 +10,7 @@ pub struct CPU {
     pub register_x: u8,
     pub register_y: u8,
     pub program_counter: u16,
-    pub stack_pointer: u8,
+    stack: Stack,
     status: Flags,
     memory: Memory,
 }
@@ -21,22 +23,19 @@ enum AddressingMode {
     Indirect,
 }
 
-const ADDRESS_STACK: u16 = 0x0100;
+
 
 // Implementation
 
 impl CPU {
-    pub fn new() -> Self {
-        Self::new_mem(Memory::new())
-    }
 
-    pub fn new_mem(memory: Memory) -> Self {
+    pub fn new(memory: Memory) -> Self {
         CPU {
             register_a: 0,
             register_x: 0,
             register_y: 0,
             program_counter: 0,
-            stack_pointer: 0xFF,
+            stack: Stack::new(),
             status: Flags::new(),
             memory,
         }
@@ -70,31 +69,6 @@ impl CPU {
         let high_byte = self.memory.mem_read(addr + 1) as u16;
 
         (high_byte << 8) | low_byte
-    }
-
-    fn write_value_sp(&mut self, value: u8) {
-        let address_to_store_value = ADDRESS_STACK + self.stack_pointer as u16;
-        self.memory.mem_write(address_to_store_value, value);
-        self.stack_pointer -= 1;
-    }
-
-    fn read_value_sp(&mut self) -> u8 {
-        self.stack_pointer += 1;
-        let address_to_get_value = ADDRESS_STACK + self.stack_pointer as u16;
-
-        self.memory.mem_read(address_to_get_value)
-    }
-
-    fn read_from_stack(&mut self) -> u16 {
-        let low_byte = self.read_value_sp() as u16;
-        let high_byte = self.read_value_sp() as u16;
-
-        (high_byte << 8) | low_byte
-    }
-
-    fn write_in_stack(&mut self, addr: u16) {
-        self.write_value_sp((addr >> 8) as u8 );
-        self.write_value_sp(addr as u8);
     }
 
     fn get_operand_address(&mut self, mode: AddressingMode) -> u16 {
@@ -240,48 +214,49 @@ impl CPU {
 
 
     fn pha(&mut self) {
-        self.write_value_sp(self.register_a);
+        self.stack.write_value(&mut self.memory, self.register_a);
     }
 
     fn pla(&mut self) {
-        self.register_a = self.read_value_sp();
+        self.register_a = self.stack.read_value(&mut self.memory);
         self.status.update_zero_and_negative_flags(self.register_a);
     }
 
     fn php(&mut self) {
         let status = self.status.get_status();
-        self.write_value_sp(status);
+        self.stack.write_value(&mut self.memory, status);
     }
 
     fn plp(&mut self) {
-        let stored_status = self.read_value_sp();
+        let stored_status = self.stack.read_value(&mut self.memory);
         self.status.set_status(stored_status);
     }
 
     fn jsr(&mut self) {
         let address = self.read_from_pc();
-        self.write_in_stack(self.program_counter - 1);
+        self.stack.write_address(&mut self.memory, self.program_counter - 1);
 
         self.program_counter = address;
     }
 
     fn rts(&mut self) {
-        let address = self.read_from_stack() + 1; // last PC + 1
+        let address = self.stack.read_address(&mut self.memory) + 1; // last PC + 1
         self.program_counter = address;
     }
 
     fn brk(&mut self) {
-        self.write_in_stack(self.program_counter);
+        self.stack.write_address(&mut self.memory, self.program_counter);
 
         self.status.set_flag(Flag::BREAK, true);
-        self.write_value_sp(self.status.get_status());
+        self.status.set_flag(Flag::INTERRUPT, true);
+        self.stack.write_value(&mut self.memory, self.status.get_status());
 
         self.program_counter = self.read_from_memory(0xFFFE);
     }
 
     fn rti(&mut self) {
-        let status = self.read_value_sp();
-        let previous_address = self.read_from_stack();
+        let status = self.stack.read_value(&mut self.memory);
+        let previous_address = self.stack.read_address(&mut self.memory);
 
         self.status.set_status(status);
         self.program_counter = previous_address;
@@ -351,37 +326,95 @@ impl CPU {
     }
 }
 
+
+#[cfg(test)]
+pub struct CPUState {
+    pub register_a: u8,
+    pub register_x: u8,
+    pub register_y: u8,
+    pub program_counter: u16,
+    pub stack_pointer: u8
+}
+
+#[cfg(test)]
+impl Default for CPUState {
+    fn default() -> Self {
+        Self {
+            register_a: 0,
+            register_x: 0,
+            register_y: 0,
+            program_counter: 0x8000,
+            stack_pointer: 0xFF
+        }
+    }
+}
+
+#[cfg(test)]
+impl CPU {
+    fn new_for_test(memory: Memory, state: CPUState) -> CPU {
+        CPU {
+            register_a: state.register_a,
+            register_x: state.register_x,
+            register_y: state.register_y,
+            program_counter: state.program_counter,
+            stack: Stack::new_sp(state.stack_pointer),
+            status: Flags::new(),
+            memory,
+        }
+    }
+}
+
 // Tests
 #[cfg(test)]
 mod tests_cpu {
     use super::*;
     use crate::cpu::flags::Flag;
+    use crate::cpu::stack::STACK_BASE;
 
-    fn init_test_memory(mem: &mut Memory) {
-        mem.mem_write(0xFFFC, 0x00);
-        mem.mem_write(0xFFFD, 0x80);
+    fn setup_cpu(program: &[u8], state: CPUState) -> CPU {
+        let mut mem = Memory::new();
+        mem.load_program(program);
+
+        let mut cpu = CPU::new_for_test(mem, state);
+        cpu.reset();
+
+        cpu
+    }
+
+    fn setup_cpu_without_state(program: &[u8]) -> CPU {
+        setup_cpu(program, CPUState::default())
+    }
+
+    fn setup_cpu_register_a(register_a: u8, program: &[u8]) -> CPU {
+        let cpu_state = CPUState { register_a, ..Default::default() };
+        setup_cpu(program, cpu_state)
+    }
+
+    fn setup_cpu_register_x(register_x: u8, program: &[u8]) -> CPU {
+        let cpu_state = CPUState { register_x, ..Default::default() };
+        setup_cpu(program, cpu_state)
+    }
+
+    fn setup_cpu_register_y(register_y: u8, program: &[u8]) -> CPU {
+        let cpu_state = CPUState { register_y, ..Default::default() };
+        setup_cpu(program, cpu_state)
+    }
+
+    fn setup_stack_pointer(stack_pointer: u8, program: &[u8]) -> CPU {
+        let cpu_state = CPUState { stack_pointer, ..Default::default() };
+        setup_cpu(program, cpu_state)
     }
 
     #[test]
     fn test_example() {
-        let mut memory = Memory::new();
-        init_test_memory(&mut memory);
-
-        let mut cpu = CPU::new_mem(memory);
-        cpu.reset();
+        let cpu = setup_cpu_without_state(&[]);
         assert_eq!(cpu.program_counter, 0x8000);
     }
 
+
     #[test]
     fn test_lda_immediate_sets_register_a_and_flags() {
-        let mut memory = Memory::new();
-        init_test_memory(&mut memory);
-        memory.mem_write(0x8000, 0xA9);
-        memory.mem_write(0x8001, 0x42);
-
-        let mut cpu = CPU::new_mem(memory);
-
-        cpu.reset();
+        let mut cpu = setup_cpu_without_state(&[0xA9, 0x42]);
         cpu.step();
 
         assert_eq!(cpu.register_a, 0x42);
@@ -392,18 +425,9 @@ mod tests_cpu {
 
     #[test]
     fn test_lda_zero_page() {
-        let mut memory = Memory::new();
-        init_test_memory(&mut memory);
+        let mut cpu = setup_cpu_without_state(&[0xA5, 0x10]);
+        cpu.memory.mem_write(0x0010, 0x99);
 
-        // LDA $10
-        memory.mem_write(0x8000, 0xA5);
-        memory.mem_write(0x8001, 0x10);
-
-        memory.mem_write(0x0010, 0x99);
-
-        let mut cpu = CPU::new_mem(memory);
-
-        cpu.reset();
         cpu.step();
 
         assert_eq!(cpu.register_a, 0x99);
@@ -411,19 +435,11 @@ mod tests_cpu {
         assert!(cpu.status.get_flag(Flag::NEGATIVE));
     }
 
+
+
     #[test]
     fn test_sta_zero_page() {
-        let mut memory = Memory::new();
-        init_test_memory(&mut memory);
-
-        // LDA $10
-        memory.mem_write(0x8000, 0x85);
-        memory.mem_write(0x8001, 0x10);
-
-        let mut cpu = CPU::new_mem(memory);
-        cpu.register_a = 0x42;
-
-        cpu.reset();
+         let mut cpu = setup_cpu_register_a(0x42, &[0x85, 0x10]);
         cpu.step();
 
         assert_eq!(cpu.memory.mem_read(0x0010), 0x42);
@@ -431,18 +447,7 @@ mod tests_cpu {
 
     #[test]
     fn test_sta_absolute() {
-        let mut memory = Memory::new();
-        init_test_memory(&mut memory);
-
-        memory.mem_write(0x8000, 0x8D); // STA Absolute
-        memory.mem_write(0x8001, 0x34); // low byte
-        memory.mem_write(0x8002, 0x12); // high byte
-
-        let mut cpu = CPU::new_mem(memory);
-
-        cpu.register_a = 0x99;
-
-        cpu.reset();
+        let mut cpu = setup_cpu_register_a(0x99, &[0x8D, 0x34, 0x12]);
         cpu.step();
 
         assert_eq!(cpu.memory.mem_read(0x1234), 0x99);
@@ -450,18 +455,7 @@ mod tests_cpu {
 
     #[test]
     fn test_sta_pc_increment() {
-        let mut memory = Memory::new();
-        init_test_memory(&mut memory);
-
-        // LDA $10
-        memory.mem_write(0x8000, 0x85);
-        memory.mem_write(0x8001, 0x10);
-
-        let mut cpu = CPU::new_mem(memory);
-
-        cpu.register_a = 0x42;
-
-        cpu.reset();
+        let mut cpu = setup_cpu_register_a(0x42, &[0x85, 0x10]);
         cpu.step();
 
         assert_eq!(cpu.program_counter, 0x8002);
@@ -469,16 +463,7 @@ mod tests_cpu {
 
     #[test]
     fn test_tax_transfer_a_to_x() {
-        let mut memory = Memory::new();
-        init_test_memory(&mut memory);
-
-        let mut cpu = CPU::new_mem(memory);
-
-        cpu.memory.mem_write(0x8000, 0xAA); // TAX
-
-        cpu.register_a = 0x42;
-
-        cpu.reset();
+        let mut cpu = setup_cpu_register_a(0x42, &[0xAA]);
         cpu.step();
 
         assert_eq!(cpu.register_x, 0x42);
@@ -486,16 +471,7 @@ mod tests_cpu {
 
     #[test]
     fn test_tax_flags() {
-        let mut memory = Memory::new();
-        init_test_memory(&mut memory);
-
-        let mut cpu = CPU::new_mem(memory);
-
-        cpu.memory.mem_write(0x8000, 0xAA); // TAX
-
-        cpu.register_a = 0x00;
-
-        cpu.reset();
+        let mut cpu = setup_cpu_register_a(0x00, &[0xAA]);
         cpu.step();
 
         assert!(cpu.status.get_flag(Flag::ZERO));
@@ -512,14 +488,7 @@ mod tests_cpu {
 
     #[test]
     fn test_tax_pc_increment() {
-        let mut memory = Memory::new();
-        init_test_memory(&mut memory);
-
-        memory.mem_write(0x8000, 0xAA);
-
-        let mut cpu = CPU::new_mem(memory);
-
-        cpu.reset();
+        let mut cpu = setup_cpu_without_state( &[0xAA]);
         cpu.step();
 
         assert_eq!(cpu.program_counter, 0x8001);
@@ -527,15 +496,7 @@ mod tests_cpu {
 
     #[test]
     fn test_inx_increment() {
-        let mut memory = Memory::new();
-        init_test_memory(&mut memory);
-
-        memory.mem_write(0x8000, 0xE8); // INX
-
-        let mut cpu = CPU::new_mem(memory);
-        cpu.register_x = 0x41;
-
-        cpu.reset();
+        let mut cpu = setup_cpu_register_x(0x41, &[0xE8]);
         cpu.step();
 
         assert_eq!(cpu.register_x, 0x42);
@@ -543,14 +504,7 @@ mod tests_cpu {
 
     #[test]
     fn test_inx_overflow() {
-        let mut memory = Memory::new();
-        init_test_memory(&mut memory);
-        memory.mem_write(0x8000, 0xE8); // INX
-
-        let mut cpu = CPU::new_mem(memory);
-        cpu.register_x = 0xFF;
-
-        cpu.reset();
+        let mut cpu = setup_cpu_register_x(0xFF, &[0xE8]);
         cpu.step();
 
         assert_eq!(cpu.register_x, 0x00);
@@ -558,15 +512,7 @@ mod tests_cpu {
 
     #[test]
     fn test_inx_flags() {
-        let mut memory = Memory::new();
-        init_test_memory(&mut memory);
-
-        memory.mem_write(0x8000, 0xE8); // INX
-
-        let mut cpu = CPU::new_mem(memory);
-        cpu.register_x = 0xFF;
-
-        cpu.reset();
+        let mut cpu = setup_cpu_register_x(0xFF, &[0xE8]);
         cpu.step();
 
         assert!(cpu.status.get_flag(Flag::ZERO));
@@ -583,16 +529,7 @@ mod tests_cpu {
 
     #[test]
     fn test_adc_immediate() {
-        let mut memory = Memory::new();
-        init_test_memory(&mut memory);
-
-        memory.mem_write(0x8000, 0x69);
-        memory.mem_write(0x8001, 0x10);
-
-        let mut cpu = CPU::new_mem(memory);
-        cpu.register_a = 0x20;
-
-        cpu.reset();
+        let mut cpu = setup_cpu_register_a(0x20, &[0x69, 0x10]);
         cpu.step();
 
         assert_eq!(cpu.register_a, 0x30);
@@ -600,16 +537,7 @@ mod tests_cpu {
 
     #[test]
     fn test_adc_carry_flag() {
-        let mut memory = Memory::new();
-        init_test_memory(&mut memory);
-
-        memory.mem_write(0x8000, 0x69);
-        memory.mem_write(0x8001, 0xFF);
-
-        let mut cpu = CPU::new_mem(memory);
-        cpu.register_a = 0x02;
-
-        cpu.reset();
+        let mut cpu = setup_cpu_register_a(0x02, &[0x69, 0xFF]);
         cpu.step();
 
         assert!(cpu.status.get_flag(Flag::CARRY));
@@ -617,16 +545,7 @@ mod tests_cpu {
 
     #[test]
     fn test_adc_zero_flag() {
-        let mut memory = Memory::new();
-        init_test_memory(&mut memory);
-
-        memory.mem_write(0x8000, 0x69);
-        memory.mem_write(0x8001, 0x00);
-
-        let mut cpu = CPU::new_mem(memory);
-        cpu.register_a = 0x00;
-
-        cpu.reset();
+        let mut cpu = setup_cpu_without_state( &[0x69, 0x00]);
         cpu.step();
 
         assert!(cpu.status.get_flag(Flag::ZERO));
@@ -634,16 +553,7 @@ mod tests_cpu {
 
     #[test]
     fn test_adc_negative_flag() {
-        let mut memory = Memory::new();
-        init_test_memory(&mut memory);
-
-        memory.mem_write(0x8000, 0x69);
-        memory.mem_write(0x8001, 0x80);
-
-        let mut cpu = CPU::new_mem(memory);
-        cpu.register_a = 0x00;
-
-        cpu.reset();
+        let mut cpu = setup_cpu_without_state( &[0x69, 0x80]);
         cpu.step();
 
         assert!(cpu.status.get_flag(Flag::NEGATIVE));
@@ -651,16 +561,7 @@ mod tests_cpu {
 
     #[test]
     fn test_adc_overflow_flag() {
-        let mut memory = Memory::new();
-        init_test_memory(&mut memory);
-
-        memory.mem_write(0x8000, 0x69);
-        memory.mem_write(0x8001, 0x50);
-
-        let mut cpu = CPU::new_mem(memory);
-        cpu.register_a = 0x50;
-
-        cpu.reset();
+        let mut cpu = setup_cpu_register_a(0x50, &[0x69, 0x50]);
         cpu.step();
 
         assert!(cpu.status.get_flag(Flag::OVERFLOW));
@@ -668,19 +569,8 @@ mod tests_cpu {
 
     #[test]
     fn test_sbc_immediate_basic() {
-        let mut memory = Memory::new();
-        init_test_memory(&mut memory);
-
-        memory.mem_write(0x8000, 0xE9); // SBC #$03
-        memory.mem_write(0x8001, 0x03);
-
-        let mut cpu = CPU::new_mem(memory);
-
-        cpu.register_a = 10;
-
-        cpu.reset();
+        let mut cpu = setup_cpu_register_a(10, &[0xE9, 0x03]);
         cpu.status.update_carry_flags(true);
-
         cpu.step();
 
         assert_eq!(cpu.register_a, 7);
@@ -688,17 +578,7 @@ mod tests_cpu {
 
     #[test]
     fn test_sbc_no_carry_flag() {
-        let mut memory = Memory::new();
-        init_test_memory(&mut memory);
-
-        memory.mem_write(0x8000, 0xE9);
-        memory.mem_write(0x8001, 0x03);
-
-        let mut cpu = CPU::new_mem(memory);
-
-        cpu.register_a = 10;
-
-        cpu.reset();
+        let mut cpu = setup_cpu_register_a(10, &[0xE9, 0x03]);
         cpu.step();
 
         assert_eq!(cpu.register_a, 6);
@@ -706,18 +586,8 @@ mod tests_cpu {
 
     #[test]
     fn test_sbc_zero_flag() {
-        let mut memory = Memory::new();
-        init_test_memory(&mut memory);
-
-        memory.mem_write(0x8000, 0xE9);
-        memory.mem_write(0x8001, 0x05);
-
-        let mut cpu = CPU::new_mem(memory);
-        cpu.register_a = 5;
-
-        cpu.reset();
+        let mut cpu = setup_cpu_register_a(5, &[0xE9, 0x05]);
         cpu.status.update_carry_flags(true);
-
         cpu.step();
 
         assert_eq!(cpu.register_a, 0);
@@ -726,18 +596,8 @@ mod tests_cpu {
 
     #[test]
     fn test_sbc_negative_flag() {
-        let mut memory = Memory::new();
-        init_test_memory(&mut memory);
-
-        memory.mem_write(0x8000, 0xE9);
-        memory.mem_write(0x8001, 0x02);
-
-        let mut cpu = CPU::new_mem(memory);
-        cpu.register_a = 1;
-
-        cpu.reset();
+        let mut cpu = setup_cpu_register_a(1, &[0xE9, 0x02]);
         cpu.status.update_carry_flags(true);
-
         cpu.step();
 
         assert_eq!(cpu.register_a, 0xFF);
@@ -746,18 +606,8 @@ mod tests_cpu {
 
     #[test]
     fn test_sbc_carry_with_carry_flags() {
-        let mut memory = Memory::new();
-        init_test_memory(&mut memory);
-
-        memory.mem_write(0x8000, 0xE9);
-        memory.mem_write(0x8001, 0x03);
-
-        let mut cpu = CPU::new_mem(memory);
-        cpu.register_a = 10;
-
-        cpu.reset();
+        let mut cpu = setup_cpu_register_a(10, &[0xE9, 0x03]);
         cpu.status.update_carry_flags(true);
-
         cpu.step();
 
         assert!(cpu.status.get_flag(Flag::CARRY));
@@ -765,44 +615,15 @@ mod tests_cpu {
 
     #[test]
     fn test_sbc_overflow() {
-        let mut memory = Memory::new();
-        init_test_memory(&mut memory);
-
-        memory.mem_write(0x8000, 0xE9);
-        memory.mem_write(0x8001, 0x01);
-
-        let mut cpu = CPU::new_mem(memory);
-        cpu.register_a = 0x80; // -128
-
-        cpu.reset();
-        cpu.status.update_carry_flags(true);
-
+        let mut cpu = setup_cpu_register_a(0x80, &[0xE9, 0x02]);
         cpu.step();
 
         assert!(cpu.status.get_flag(Flag::OVERFLOW));
     }
 
-    fn setup_compare_tests(opcode: u8, operand_low: u8, operand_high: Option<u8>) -> CPU {
-        let mut memory = Memory::new();
-        init_test_memory(&mut memory);
-
-        memory.mem_write(0x8000, opcode);
-        memory.mem_write(0x8001, operand_low);
-
-        if let Some(high) = operand_high {
-            memory.mem_write(0x8002, high);
-        }
-
-        let mut cpu = CPU::new_mem(memory);
-        cpu.reset();
-        cpu
-    }
-
     #[test]
     fn test_cmp_equal() {
-        let mut cpu = setup_compare_tests(0xC9, 0x05, None); // CMP #$05
-        cpu.register_a = 0x05;
-
+        let mut cpu = setup_cpu_register_a(0x05, &[0xC9, 0x05]);
         cpu.step();
 
         assert!(cpu.status.get_flag(Flag::ZERO));
@@ -812,9 +633,7 @@ mod tests_cpu {
 
     #[test]
     fn test_cmp_more_than() {
-        let mut cpu = setup_compare_tests(0xC9, 0x03, None); // CMP #$03
-        cpu.register_a = 0x05;
-
+        let mut cpu = setup_cpu_register_a(0x05, &[0xC9, 0x03]);
         cpu.step();
 
         assert!(!cpu.status.get_flag(Flag::ZERO));
@@ -824,9 +643,7 @@ mod tests_cpu {
 
     #[test]
     fn test_cmp_less_than() {
-        let mut cpu = setup_compare_tests(0xC9, 0x05, None); // CMP #$05
-        cpu.register_a = 0x03;
-
+        let mut cpu = setup_cpu_register_a(0x03, &[0xC9, 0x05]);
         cpu.step();
 
         assert!(!cpu.status.get_flag(Flag::ZERO));
@@ -836,10 +653,8 @@ mod tests_cpu {
 
     #[test]
     fn test_cmp_zeropage() {
-        let mut cpu = setup_compare_tests(0xC5, 0x10, None); // CMP $10
-        cpu.register_a = 0x42;
+        let mut cpu = setup_cpu_register_a(0x42, &[0xC5, 0x10]);
         cpu.memory.mem_write(0x0010, 0x42);
-
         cpu.step();
 
         assert!(cpu.status.get_flag(Flag::ZERO));
@@ -848,10 +663,8 @@ mod tests_cpu {
 
     #[test]
     fn test_cmp_absolute() {
-        let mut cpu = setup_compare_tests(0xCD, 0x34, Some(0x12)); // CMP $1234
-        cpu.register_a = 0x50;
+        let mut cpu = setup_cpu_register_a(0x42, &[0xCD, 0x34, 0x12]);
         cpu.memory.mem_write(0x1234, 0x10);
-
         cpu.step();
 
         assert!(cpu.status.get_flag(Flag::CARRY));
@@ -860,9 +673,7 @@ mod tests_cpu {
 
     #[test]
     fn test_cpx_equal() {
-        let mut cpu = setup_compare_tests(0xE0, 0x08, None); // CPX #$08
-        cpu.register_x = 0x08;
-
+        let mut cpu = setup_cpu_register_x(0x08, &[0xE0, 0x08]);
         cpu.step();
 
         assert!(cpu.status.get_flag(Flag::ZERO));
@@ -871,9 +682,7 @@ mod tests_cpu {
 
     #[test]
     fn test_cpx_less_than() {
-        let mut cpu = setup_compare_tests(0xE0, 0x10, None); // CPX #$10
-        cpu.register_x = 0x01;
-
+        let mut cpu = setup_cpu_register_x(0x01, &[0xE0, 0x10]);
         cpu.step();
 
         assert!(!cpu.status.get_flag(Flag::CARRY));
@@ -882,8 +691,7 @@ mod tests_cpu {
 
     #[test]
     fn test_cpx_zeropage() {
-        let mut cpu = setup_compare_tests(0xE4, 0x20, None); // CPX $20
-        cpu.register_x = 0x33;
+        let mut cpu = setup_cpu_register_x(0x33, &[0xE4, 0x20]);
         cpu.memory.mem_write(0x0020, 0x33);
 
         cpu.step();
@@ -893,9 +701,7 @@ mod tests_cpu {
 
     #[test]
     fn test_cpy_equal() {
-        let mut cpu = setup_compare_tests(0xC0, 0x09, None); // CPY #$09
-        cpu.register_y = 0x09;
-
+        let mut cpu = setup_cpu_register_y(0x09, &[0xC0, 0x09]);
         cpu.step();
 
         assert!(cpu.status.get_flag(Flag::ZERO));
@@ -904,9 +710,7 @@ mod tests_cpu {
 
     #[test]
     fn test_cpy_greater_than() {
-        let mut cpu = setup_compare_tests(0xC0, 0x01, None); // CPY #$01
-        cpu.register_y = 0x05;
-
+        let mut cpu = setup_cpu_register_y(0x05, &[0xC0, 0x01]);
         cpu.step();
 
         assert!(cpu.status.get_flag(Flag::CARRY));
@@ -915,8 +719,7 @@ mod tests_cpu {
 
     #[test]
     fn test_cpy_absolute() {
-        let mut cpu = setup_compare_tests(0xCC, 0x00, Some(0x20)); // CPY $2000
-        cpu.register_y = 0x01;
+        let mut cpu = setup_cpu_register_y(0x01, &[0xCC, 0x00, 0x20]);
         cpu.memory.mem_write(0x2000, 0x02);
 
         cpu.step();
@@ -927,15 +730,7 @@ mod tests_cpu {
 
     #[test]
     fn test_jmp_absolute() {
-        let mut memory = Memory::new();
-        init_test_memory(&mut memory);
-
-        memory.mem_write(0x8000, 0x4C); // JMP Absolute
-        memory.mem_write(0x8001, 0x34); // low
-        memory.mem_write(0x8002, 0x12); // high
-
-        let mut cpu = CPU::new_mem(memory);
-        cpu.reset();
+        let mut cpu = setup_cpu_without_state(&[0x4C, 0x34, 0x12]);
         cpu.step();
 
         assert_eq!(cpu.program_counter, 0x1234);
@@ -943,19 +738,13 @@ mod tests_cpu {
 
     #[test]
     fn test_jmp_indirect() {
-        let mut memory = Memory::new();
-        init_test_memory(&mut memory);
+        let mut cpu = setup_cpu_without_state(&[0x6C, // JMP Indirect
+            0x00, // pointer low
+            0x20, // pointer high
+        ]);
+        cpu.memory.mem_write(0x2000, 0x78); // low target
+        cpu.memory.mem_write(0x2001, 0x56); // high target
 
-        memory.mem_write(0x8000, 0x6C); // JMP Indirect
-        memory.mem_write(0x8001, 0x00); // pointer low
-        memory.mem_write(0x8002, 0x20); // pointer high
-
-        // pointer = $2000
-        memory.mem_write(0x2000, 0x78); // low target
-        memory.mem_write(0x2001, 0x56); // high target
-
-        let mut cpu = CPU::new_mem(memory);
-        cpu.reset();
         cpu.step();
 
         assert_eq!(cpu.program_counter, 0x5678);
@@ -963,41 +752,25 @@ mod tests_cpu {
 
     #[test]
     fn test_jmp_chain_execution() {
-        let mut memory = Memory::new();
-        init_test_memory(&mut memory);
+        let mut cpu = setup_cpu_without_state(&[0x4C, 0x00, 0x90  ]); // JMP $9000
+        cpu.memory.mem_write(0x9000, 0xA9); // LDA $42
+        cpu.memory.mem_write(0x9001, 0x42);
 
-        memory.mem_write(0x8000, 0x4C); // JMP $9000
-        memory.mem_write(0x8001, 0x00);
-        memory.mem_write(0x8002, 0x90);
-
-        memory.mem_write(0x9000, 0xA9); // LDA #$42
-        memory.mem_write(0x9001, 0x42);
-
-        let mut cpu = CPU::new_mem(memory);
-        cpu.reset();
         cpu.step(); // jump
         cpu.step(); // lda
 
         assert_eq!(cpu.register_a, 0x42);
     }
 
-    fn setup_branching_test(opcode: u8, offset: u8) -> CPU {
-        let mut mem = Memory::new();
-        init_test_memory(&mut mem);
-
-        mem.mem_write(0x8000, opcode);
-        mem.mem_write(0x8001, offset);
-
-        let mut cpu = CPU::new_mem(mem);
-        cpu.reset();
+    fn setup_branching_test(flag: Flag, value: bool, program: &[u8]) -> CPU {
+        let mut cpu = setup_cpu_without_state(program);
+        cpu.status.set_flag(flag, value);
         cpu
     }
 
     #[test]
     fn test_beq_taken_forward() {
-        let mut cpu = setup_branching_test(0xF0, 0x05);
-        cpu.status.set_flag(Flag::ZERO, true);
-
+        let mut cpu = setup_branching_test(Flag::ZERO, true, &[0xF0, 0x05]);
         cpu.step();
 
         assert_eq!(cpu.program_counter, 0x8007);
@@ -1005,9 +778,7 @@ mod tests_cpu {
 
     #[test]
     fn test_beq_not_taken() {
-        let mut cpu = setup_branching_test(0xF0, 0x05);
-        cpu.status.set_flag(Flag::ZERO, false);
-
+        let mut cpu = setup_branching_test(Flag::ZERO, false, &[0xF0, 0x05]);
         cpu.step();
 
         assert_eq!(cpu.program_counter, 0x8002);
@@ -1015,9 +786,7 @@ mod tests_cpu {
 
     #[test]
     fn test_bne_taken_backward() {
-        let mut cpu = setup_branching_test(0xD0, 0xFB); // -5
-        cpu.status.set_flag(Flag::ZERO, false);
-
+        let mut cpu = setup_branching_test(Flag::ZERO, false, &[0xD0, 0xFB]); // -5
         cpu.step();
 
         assert_eq!(cpu.program_counter, 0x7FFD);
@@ -1025,9 +794,7 @@ mod tests_cpu {
 
     #[test]
     fn test_bne_not_taken() {
-        let mut cpu = setup_branching_test(0xD0, 0x05);
-        cpu.status.set_flag(Flag::ZERO, true);
-
+        let mut cpu = setup_branching_test(Flag::ZERO, true, &[0xD0, 0x05]);
         cpu.step();
 
         assert_eq!(cpu.program_counter, 0x8002);
@@ -1035,9 +802,7 @@ mod tests_cpu {
 
     #[test]
     fn test_bcc_taken() {
-        let mut cpu = setup_branching_test(0x90, 0x04);
-        cpu.status.set_flag(Flag::CARRY, false);
-
+        let mut cpu = setup_branching_test(Flag::CARRY, false, &[0x90, 0x04]);
         cpu.step();
 
         assert_eq!(cpu.program_counter, 0x8006);
@@ -1045,9 +810,7 @@ mod tests_cpu {
 
     #[test]
     fn test_bcc_not_taken() {
-        let mut cpu = setup_branching_test(0x90, 0x04);
-        cpu.status.set_flag(Flag::CARRY, true);
-
+        let mut cpu = setup_branching_test(Flag::CARRY, true, &[0x90, 0x04]);
         cpu.step();
 
         assert_eq!(cpu.program_counter, 0x8002);
@@ -1055,9 +818,7 @@ mod tests_cpu {
 
     #[test]
     fn test_bcs_taken() {
-        let mut cpu = setup_branching_test(0xB0, 0x02);
-        cpu.status.set_flag(Flag::CARRY, true);
-
+        let mut cpu = setup_branching_test(Flag::CARRY, true, &[0xB0, 0x02]);
         cpu.step();
 
         assert_eq!(cpu.program_counter, 0x8004);
@@ -1065,9 +826,7 @@ mod tests_cpu {
 
     #[test]
     fn test_bcs_not_taken() {
-        let mut cpu = setup_branching_test(0xB0, 0x02);
-        cpu.status.set_flag(Flag::CARRY, false);
-
+        let mut cpu = setup_branching_test(Flag::CARRY, false, &[0xB0, 0x02]);
         cpu.step();
 
         assert_eq!(cpu.program_counter, 0x8002);
@@ -1075,9 +834,7 @@ mod tests_cpu {
 
     #[test]
     fn test_bvc_taken() {
-        let mut cpu = setup_branching_test(0x50, 0x06);
-        cpu.status.set_flag(Flag::OVERFLOW, false);
-
+        let mut cpu = setup_branching_test(Flag::OVERFLOW, false, &[0x50, 0x06]);
         cpu.step();
 
         assert_eq!(cpu.program_counter, 0x8008);
@@ -1085,9 +842,7 @@ mod tests_cpu {
 
     #[test]
     fn test_bvc_not_taken() {
-        let mut cpu = setup_branching_test(0x50, 0x06);
-        cpu.status.set_flag(Flag::OVERFLOW, true);
-
+        let mut cpu = setup_branching_test(Flag::OVERFLOW, true, &[0x50, 0x06]);
         cpu.step();
 
         assert_eq!(cpu.program_counter, 0x8002);
@@ -1095,9 +850,7 @@ mod tests_cpu {
 
     #[test]
     fn test_bvs_taken() {
-        let mut cpu = setup_branching_test(0x70, 0x01);
-        cpu.status.set_flag(Flag::OVERFLOW, true);
-
+        let mut cpu = setup_branching_test(Flag::OVERFLOW, true, &[0x70, 0x01]);
         cpu.step();
 
         assert_eq!(cpu.program_counter, 0x8003);
@@ -1105,18 +858,14 @@ mod tests_cpu {
 
     #[test]
     fn test_bvs_not_taken() {
-        let mut cpu = setup_branching_test(0x70, 0x01);
-        cpu.status.set_flag(Flag::OVERFLOW, false);
-
+        let mut cpu = setup_branching_test(Flag::OVERFLOW, false, &[0x70, 0x01]);
         cpu.step();
 
         assert_eq!(cpu.program_counter, 0x8002);
     }
     #[test]
     fn test_branch_zero_offset() {
-        let mut cpu = setup_branching_test(0xF0, 0x00);
-        cpu.status.set_flag(Flag::ZERO, true);
-
+        let mut cpu = setup_branching_test(Flag::ZERO, true, &[0xF0, 0x00]);
         cpu.step();
 
         assert_eq!(cpu.program_counter, 0x8002);
@@ -1124,58 +873,37 @@ mod tests_cpu {
 
     #[test]
     fn test_branch_negative_one() {
-        let mut cpu = setup_branching_test(0xD0, 0xFF); // -1
-        cpu.status.set_flag(Flag::ZERO, false);
-
+        let mut cpu = setup_branching_test(Flag::ZERO, false, &[0xD0, 0xFF]);
         cpu.step();
 
         assert_eq!(cpu.program_counter, 0x8001);
     }
 
-    fn setup_stack_instruction(opcode: u8) -> CPU {
-        let mut mem = Memory::new();
-        init_test_memory(&mut mem);
-
-        mem.mem_write(0x8000, opcode);
-
-        let mut cpu = CPU::new_mem(mem);
-        cpu.reset();
-        cpu.stack_pointer = 0xFF;
-        cpu
-    }
-
-
     #[test]
     fn test_pha_pushes_a_to_stack() {
-        let mut cpu = setup_stack_instruction(0x48); // PHA
-        cpu.register_a = 0x42;
-
+        let mut cpu = setup_cpu_register_a(0x42, &[0x48]); // PHA
         cpu.step();
 
-        let addr = ADDRESS_STACK + 0xFF;
+        let addr = STACK_BASE + 0xFF;
         assert_eq!(cpu.memory.mem_read(addr), 0x42);
-        assert_eq!(cpu.stack_pointer, 0xFE);
+        assert_eq!(cpu.stack.get(), 0xFE);
     }
 
     #[test]
     fn test_pla_pulls_value_from_stack() {
-        let mut cpu = setup_stack_instruction(0x68); // PLA
-
+        let mut cpu = setup_stack_pointer(0xFE, &[0x68]); // PLA
         cpu.memory.mem_write(0x01FF, 0x37);
-        cpu.stack_pointer = 0xFE;
 
         cpu.step();
 
         assert_eq!(cpu.register_a, 0x37);
-        assert_eq!(cpu.stack_pointer, 0xFF);
+        assert_eq!(cpu.stack.get(), 0xFF);
     }
 
     #[test]
     fn test_pla_sets_zero_flag() {
-        let mut cpu = setup_stack_instruction(0x68);
-
+        let mut cpu = setup_stack_pointer(0xFE, &[0x68]); // PLA
         cpu.memory.mem_write(0x01FF, 0x00);
-        cpu.stack_pointer = 0xFE;
 
         cpu.step();
 
@@ -1184,10 +912,8 @@ mod tests_cpu {
 
     #[test]
     fn test_pla_sets_negative_flag() {
-        let mut cpu = setup_stack_instruction(0x68);
-
+        let mut cpu = setup_stack_pointer(0xFE, &[0x68]); // PLA
         cpu.memory.mem_write(0x01FF, 0x80);
-        cpu.stack_pointer = 0xFE;
 
         cpu.step();
 
@@ -1196,37 +922,29 @@ mod tests_cpu {
 
     #[test]
     fn test_php_pushes_status() {
-        let mut cpu = setup_stack_instruction(0x08); // PHP
+        let mut cpu = setup_cpu_without_state(&[0x08]); // PHP
         cpu.status.set_flag(Flag::CARRY, true);
 
         cpu.step();
 
-        let addr = ADDRESS_STACK + 0xFF;
+        let addr = STACK_BASE + 0xFF;
         assert_eq!(cpu.memory.mem_read(addr), cpu.status.get_status());
-        assert_eq!(cpu.stack_pointer, 0xFE);
+        assert_eq!(cpu.stack.get(), 0xFE);
     }
 
     #[test]
     fn test_plp_pulls_status() {
-        let mut cpu = setup_stack_instruction(0x28); // PLP
-
+        let mut cpu = setup_stack_pointer(0xFE, &[0x28]); // PLP
         cpu.memory.mem_write(0x01FF, 0b00000001);
-        cpu.stack_pointer = 0xFE;
-
         cpu.step();
 
         assert!(cpu.status.get_flag(Flag::CARRY));
-        assert_eq!(cpu.stack_pointer, 0xFF);
+        assert_eq!(cpu.stack.get(), 0xFF);
     }
 
     #[test]
     fn test_stack_lifo_behavior() {
-        let mut cpu = setup_stack_instruction(0x48); // PHA
-        cpu.memory.mem_write(0x8001, 0x48);
-        cpu.memory.mem_write(0x8002, 0x68);
-        cpu.memory.mem_write(0x8003, 0x68);
-
-        cpu.register_a = 0xAA;
+        let mut cpu = setup_cpu_register_a(0xAA, &[0x48, 0x48, 0x68, 0x68]); // PHA
         cpu.step();
 
         cpu.register_a = 0xBB;
@@ -1242,12 +960,7 @@ mod tests_cpu {
 
     #[test]
     fn test_jsr_jumps_to_target_address() {
-        let mut cpu = setup_stack_instruction(0x20);
-
-        // JSR $1234
-        cpu.memory.mem_write(0x8001, 0x34);
-        cpu.memory.mem_write(0x8002, 0x12);
-
+        let mut cpu = setup_cpu_without_state(&[0x20, 0x34, 0x12]); // JSR $1234
         cpu.step();
 
         assert_eq!(cpu.program_counter, 0x1234);
@@ -1255,28 +968,19 @@ mod tests_cpu {
 
     #[test]
     fn test_jsr_pushes_return_address_on_stack() {
-        let mut cpu = setup_stack_instruction(0x20);
-
-        cpu.memory.mem_write(0x8001, 0x00);
-        cpu.memory.mem_write(0x8002, 0x90);
-
+        let mut cpu = setup_cpu_without_state(&[0x20, 0x00, 0x90]);
         cpu.step();
 
         // Return address = PC - 1 = 0x8002
         assert_eq!(cpu.memory.mem_read(0x01FF), 0x80); // high byte
         assert_eq!(cpu.memory.mem_read(0x01FE), 0x02); // low byte
 
-        assert_eq!(cpu.stack_pointer, 0xFD);
+        assert_eq!(cpu.stack.get(), 0xFD);
     }
 
     #[test]
     fn test_multiple_jsr_stack_growth() {
-        let mut cpu = setup_stack_instruction(0x20);
-
-        // First JSR
-        cpu.memory.mem_write(0x8001, 0x00);
-        cpu.memory.mem_write(0x8002, 0x90);
-
+        let mut cpu = setup_cpu_without_state(&[0x20, 0x00, 0x90]);
         cpu.step();
 
         // Simulate second JSR at new location
@@ -1286,23 +990,15 @@ mod tests_cpu {
 
         cpu.step();
 
-        assert_eq!(cpu.stack_pointer, 0xFB);
-    }
-
-    fn setup_rts_instruction() -> CPU {
-        let mut cpu = setup_stack_instruction(0x60);
-        cpu.stack_pointer = 0xFD;
-
-        cpu
+        assert_eq!(cpu.stack.get(), 0xFB);
     }
 
     #[test]
     fn test_rts_returns_to_correct_address() {
-        let mut cpu = setup_rts_instruction();
-
         // Simulate stack containing return address 0x8002
-        cpu.memory.mem_write(0x01FE, 0x02); // low
-        cpu.memory.mem_write(0x01FF, 0x80); // high
+        let mut cpu = setup_stack_pointer(0xFD, &[0x60]);
+        cpu.memory.mem_write(0x01FF, 0x80);
+        cpu.memory.mem_write(0x01FE, 0x02);
 
         cpu.step();
 
@@ -1312,32 +1008,18 @@ mod tests_cpu {
 
     #[test]
     fn test_rts_restores_stack_pointer() {
-        let mut cpu = setup_rts_instruction();
-
-        cpu.memory.mem_write(0x01FE, 0x00);
-        cpu.memory.mem_write(0x01FF, 0x90);
-
+        let mut cpu = setup_stack_pointer(0xFD, &[0x60, 0x00, 0x90]);
         cpu.step();
 
-        assert_eq!(cpu.stack_pointer, 0xFF);
+        assert_eq!(cpu.stack.get(), 0xFF);
     }
 
     #[test]
     fn test_jsr_rts_full_cycle() {
-        let mut mem = Memory::new();
-        init_test_memory(&mut mem);
-
-        // JSR $9000
-        mem.mem_write(0x8000, 0x20);
-        mem.mem_write(0x8001, 0x00);
-        mem.mem_write(0x8002, 0x90);
+        let mut cpu = setup_cpu_without_state(&[0x20, 0x00, 0x90]);
 
         // RTS at $9000
-        mem.mem_write(0x9000, 0x60);
-
-        let mut cpu = CPU::new_mem(mem);
-        cpu.reset();
-        cpu.stack_pointer = 0xFF;
+        cpu.memory.mem_write(0x9000, 0x60);
 
         cpu.step(); // JSR
         cpu.step(); // RTS
@@ -1347,10 +1029,7 @@ mod tests_cpu {
 
     #[test]
     fn test_brk_pushes_pc_and_status() {
-        let mut cpu = setup_stack_instruction(0x00); // BRK
-
-        cpu.memory.mem_write(0x8000, 0x00);
-
+        let mut cpu = setup_cpu_without_state(&[0x00]);
         cpu.memory.mem_write(0xFFFE, 0x00);
         cpu.memory.mem_write(0xFFFF, 0x90);
         cpu.step();
@@ -1359,13 +1038,13 @@ mod tests_cpu {
         assert_eq!(cpu.memory.mem_read(0x01FF), 0x80);
         assert_eq!(cpu.memory.mem_read(0x01FE), 0x01);
 
-        assert_eq!(cpu.stack_pointer, 0xFC);
+        assert_eq!(cpu.stack.get(), 0xFC);
         assert_eq!(cpu.program_counter, 0x9000);
     }
 
     #[test]
     fn test_rti_restores_pc_and_status() {
-        let mut cpu = setup_stack_instruction(0x40); // RTI
+        let mut cpu = setup_stack_pointer(0xFC, &[0x40]);
 
         // status
         cpu.memory.mem_write(0x01FD, 0b00000001);
@@ -1374,7 +1053,6 @@ mod tests_cpu {
         cpu.memory.mem_write(0x01FE, 0x05);
         cpu.memory.mem_write(0x01FF, 0x80);
 
-        cpu.stack_pointer = 0xFC;
         cpu.step();
 
         assert_eq!(cpu.program_counter, 0x8005);
@@ -1383,18 +1061,11 @@ mod tests_cpu {
 
     #[test]
     fn test_brk_rti_cycle() {
-        let mut mem = Memory::new();
-        init_test_memory(&mut mem);
+        let mut cpu = setup_cpu_without_state(&[0x00]);
+        cpu.memory.mem_write(0x9000, 0x40); // RTI
 
-        mem.mem_write(0x8000, 0x00); // BRK
-        mem.mem_write(0x9000, 0x40); // RTI
-
-        mem.mem_write(0xFFFE, 0x00);
-        mem.mem_write(0xFFFF, 0x90);
-
-        let mut cpu = CPU::new_mem(mem);
-        cpu.reset();
-        cpu.stack_pointer = 0xFF;
+        cpu.memory.mem_write(0xFFFE, 0x00);
+        cpu.memory.mem_write(0xFFFF, 0x90);
 
         cpu.step(); // BRK
         cpu.step(); // RTI
