@@ -13,14 +13,3 @@ impl Registers {
         }
     }
 }
-
-#[cfg(test)]
-impl Registers {
-    pub fn new_for_tests(a: u8, x: u8, y: u8) -> Registers {
-        Registers {
-            a,
-            x,
-            y
-        }
-    }
-}
