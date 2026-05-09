@@ -1,15 +1,13 @@
-use std::iter::Map;
 use crate::cpu::flags::Flag;
 use crate::cpu::flags::Flags;
 use crate::cpu::memory::Memory;
+use crate::cpu::registers::Registers;
 use crate::cpu::stack::Stack;
 
 // Struct and enums
 pub struct CPU {
-    pub register_a: u8,
-    pub register_x: u8,
-    pub register_y: u8,
-    pub program_counter: u16,
+    program_counter: u16,
+    register: Registers,
     stack: Stack,
     status: Flags,
     memory: Memory,
@@ -31,10 +29,8 @@ impl CPU {
 
     pub fn new(memory: Memory) -> Self {
         CPU {
-            register_a: 0,
-            register_x: 0,
-            register_y: 0,
             program_counter: 0,
+            register: Registers::new(),
             stack: Stack::new(),
             status: Flags::new(),
             memory,
@@ -95,38 +91,38 @@ impl CPU {
     // Instructions
     fn lda(&mut self, mode: AddressingMode) {
         let value = self.get_operand_value(mode);
-        self.register_a = value;
-        self.status.update_zero_and_negative_flags(self.register_a);
+        self.register.a = value;
+        self.status.update_zero_and_negative_flags(self.register.a);
     }
 
     fn sda(&mut self, mode: AddressingMode) {
         let address = self.get_operand_address(mode);
-        self.memory.mem_write(address, self.register_a);
+        self.memory.mem_write(address, self.register.a);
     }
 
     fn tax(&mut self) {
-        self.register_x = self.register_a;
-        self.status.update_zero_and_negative_flags(self.register_x);
+        self.register.x = self.register.a;
+        self.status.update_zero_and_negative_flags(self.register.x);
     }
 
     fn inx(&mut self) {
-        self.register_x = if self.register_x == 0xFF {
+        self.register.x = if self.register.x == 0xFF {
             0
         } else {
-            self.register_x + 1
+            self.register.x + 1
         };
-        self.status.update_zero_and_negative_flags(self.register_x);
+        self.status.update_zero_and_negative_flags(self.register.x);
     }
 
     fn add_with_carry(&mut self, value: u8) {
-        let a = self.register_a;
+        let a = self.register.a;
         let carry = self.status.get_flag(Flag::CARRY) as u16;
 
         let sum = a as u16 + value as u16 + carry;
         let result = sum as u8;
         let overflow = (a ^ result) & (value ^ result) & 0x80;
 
-        self.register_a = result;
+        self.register.a = result;
 
         self.status.update_zero_and_negative_flags(result);
         self.status.update_carry_flags(sum > 0xFF);
@@ -156,15 +152,15 @@ impl CPU {
     }
 
     fn cmp(&mut self, mode: AddressingMode) {
-        self.compare(mode, self.register_a);
+        self.compare(mode, self.register.a);
     }
 
     fn cpx(&mut self, mode: AddressingMode) {
-        self.compare(mode, self.register_x);
+        self.compare(mode, self.register.x);
     }
 
     fn cpy(&mut self, mode: AddressingMode) {
-        self.compare(mode, self.register_y);
+        self.compare(mode, self.register.y);
     }
 
     fn jmp(&mut self, mode: AddressingMode) {
@@ -214,12 +210,12 @@ impl CPU {
 
 
     fn pha(&mut self) {
-        self.stack.write_value(&mut self.memory, self.register_a);
+        self.stack.write_value(&mut self.memory, self.register.a);
     }
 
     fn pla(&mut self) {
-        self.register_a = self.stack.read_value(&mut self.memory);
-        self.status.update_zero_and_negative_flags(self.register_a);
+        self.register.a = self.stack.read_value(&mut self.memory);
+        self.status.update_zero_and_negative_flags(self.register.a);
     }
 
     fn php(&mut self) {
@@ -353,9 +349,7 @@ impl Default for CPUState {
 impl CPU {
     fn new_for_test(memory: Memory, state: CPUState) -> CPU {
         CPU {
-            register_a: state.register_a,
-            register_x: state.register_x,
-            register_y: state.register_y,
+            register: Registers::new_for_tests(state.register_a, state.register_x, state.register_y),
             program_counter: state.program_counter,
             stack: Stack::new_sp(state.stack_pointer),
             status: Flags::new(),
@@ -417,7 +411,7 @@ mod tests_cpu {
         let mut cpu = setup_cpu_without_state(&[0xA9, 0x42]);
         cpu.step();
 
-        assert_eq!(cpu.register_a, 0x42);
+        assert_eq!(cpu.register.a, 0x42);
 
         assert!(!cpu.status.get_flag(Flag::ZERO));
         assert!(!cpu.status.get_flag(Flag::NEGATIVE));
@@ -430,7 +424,7 @@ mod tests_cpu {
 
         cpu.step();
 
-        assert_eq!(cpu.register_a, 0x99);
+        assert_eq!(cpu.register.a, 0x99);
         assert!(!cpu.status.get_flag(Flag::ZERO));
         assert!(cpu.status.get_flag(Flag::NEGATIVE));
     }
@@ -466,7 +460,7 @@ mod tests_cpu {
         let mut cpu = setup_cpu_register_a(0x42, &[0xAA]);
         cpu.step();
 
-        assert_eq!(cpu.register_x, 0x42);
+        assert_eq!(cpu.register.x, 0x42);
     }
 
     #[test]
@@ -477,7 +471,7 @@ mod tests_cpu {
         assert!(cpu.status.get_flag(Flag::ZERO));
         assert!(!cpu.status.get_flag(Flag::NEGATIVE));
 
-        cpu.register_a = 0x80;
+        cpu.register.a = 0x80;
 
         cpu.reset();
         cpu.step();
@@ -499,7 +493,7 @@ mod tests_cpu {
         let mut cpu = setup_cpu_register_x(0x41, &[0xE8]);
         cpu.step();
 
-        assert_eq!(cpu.register_x, 0x42);
+        assert_eq!(cpu.register.x, 0x42);
     }
 
     #[test]
@@ -507,7 +501,7 @@ mod tests_cpu {
         let mut cpu = setup_cpu_register_x(0xFF, &[0xE8]);
         cpu.step();
 
-        assert_eq!(cpu.register_x, 0x00);
+        assert_eq!(cpu.register.x, 0x00);
     }
 
     #[test]
@@ -518,7 +512,7 @@ mod tests_cpu {
         assert!(cpu.status.get_flag(Flag::ZERO));
         assert!(!cpu.status.get_flag(Flag::NEGATIVE));
 
-        cpu.register_x = 0x7F;
+        cpu.register.x = 0x7F;
 
         cpu.reset();
         cpu.step();
@@ -532,7 +526,7 @@ mod tests_cpu {
         let mut cpu = setup_cpu_register_a(0x20, &[0x69, 0x10]);
         cpu.step();
 
-        assert_eq!(cpu.register_a, 0x30);
+        assert_eq!(cpu.register.a, 0x30);
     }
 
     #[test]
@@ -573,7 +567,7 @@ mod tests_cpu {
         cpu.status.update_carry_flags(true);
         cpu.step();
 
-        assert_eq!(cpu.register_a, 7);
+        assert_eq!(cpu.register.a, 7);
     }
 
     #[test]
@@ -581,7 +575,7 @@ mod tests_cpu {
         let mut cpu = setup_cpu_register_a(10, &[0xE9, 0x03]);
         cpu.step();
 
-        assert_eq!(cpu.register_a, 6);
+        assert_eq!(cpu.register.a, 6);
     }
 
     #[test]
@@ -590,7 +584,7 @@ mod tests_cpu {
         cpu.status.update_carry_flags(true);
         cpu.step();
 
-        assert_eq!(cpu.register_a, 0);
+        assert_eq!(cpu.register.a, 0);
         assert!(cpu.status.get_flag(Flag::ZERO));
     }
 
@@ -600,7 +594,7 @@ mod tests_cpu {
         cpu.status.update_carry_flags(true);
         cpu.step();
 
-        assert_eq!(cpu.register_a, 0xFF);
+        assert_eq!(cpu.register.a, 0xFF);
         assert!(cpu.status.get_flag(Flag::NEGATIVE));
     }
 
@@ -759,7 +753,7 @@ mod tests_cpu {
         cpu.step(); // jump
         cpu.step(); // lda
 
-        assert_eq!(cpu.register_a, 0x42);
+        assert_eq!(cpu.register.a, 0x42);
     }
 
     fn setup_branching_test(flag: Flag, value: bool, program: &[u8]) -> CPU {
@@ -896,7 +890,7 @@ mod tests_cpu {
 
         cpu.step();
 
-        assert_eq!(cpu.register_a, 0x37);
+        assert_eq!(cpu.register.a, 0x37);
         assert_eq!(cpu.stack.get(), 0xFF);
     }
 
@@ -947,15 +941,15 @@ mod tests_cpu {
         let mut cpu = setup_cpu_register_a(0xAA, &[0x48, 0x48, 0x68, 0x68]); // PHA
         cpu.step();
 
-        cpu.register_a = 0xBB;
+        cpu.register.a = 0xBB;
         cpu.step();
 
         // simulate PLA
         cpu.step();
-        assert_eq!(cpu.register_a, 0xBB);
+        assert_eq!(cpu.register.a, 0xBB);
 
         cpu.step();
-        assert_eq!(cpu.register_a, 0xAA);
+        assert_eq!(cpu.register.a, 0xAA);
     }
 
     #[test]
