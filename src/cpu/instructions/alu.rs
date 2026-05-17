@@ -113,6 +113,103 @@ mod tests_alu {
     }
 
     #[test]
+    fn test_adc_absolute_x() {
+        let mut cpu = CPUBuilder::new()
+            .set_register_a(0x10)
+            .set_register_x(0x01)
+            .memory(0x2001, 0x05)
+            .load_program(&[
+                0x7D, // ADC Absolute,X
+                0x00,
+                0x20,
+            ])
+            .build();
+
+        cpu.step();
+
+        assert_eq!(cpu.register.a, 0x15);
+    }
+
+    #[test]
+    fn test_adc_absolute_y() {
+        let mut cpu = CPUBuilder::new()
+            .set_register_a(0x20)
+            .set_register_y(0x02)
+            .memory(0x2002, 0x10)
+            .load_program(&[
+                0x79, // ADC Absolute,Y
+                0x00,
+                0x20,
+            ])
+            .build();
+
+        cpu.step();
+
+        assert_eq!(cpu.register.a, 0x30);
+    }
+
+    #[test]
+    fn test_adc_zero_page_x() {
+        let mut cpu = CPUBuilder::new()
+            .set_register_a(0x05)
+            .set_register_x(0x03)
+            .memory(0x0013, 0x07)
+            .load_program(&[
+                0x75, // ADC ZeroPage,X
+                0x10,
+            ])
+            .build();
+
+        cpu.step();
+
+        assert_eq!(cpu.register.a, 0x0C);
+    }
+
+    #[test]
+    fn test_adc_indirect_x() {
+        let mut cpu = CPUBuilder::new()
+            .set_register_a(0x10)
+            .set_register_x(0x04)
+
+            .memory(0x0024, 0x10)
+            .memory(0x0025, 0x80)
+
+            .memory(0x8010, 0x05)
+
+            .load_program(&[
+                0x61, // ADC ($20,X)
+                0x20,
+            ])
+            .build();
+
+        cpu.step();
+
+        assert_eq!(cpu.register.a, 0x15);
+    }
+
+    #[test]
+    fn test_adc_indirect_y() {
+        let mut cpu = CPUBuilder::new()
+            .set_register_a(0x20)
+            .set_register_y(0x04)
+
+            .memory(0x0020, 0x00)
+            .memory(0x0021, 0x80)
+
+            .memory(0x8004, 0x10)
+
+            .load_program(&[
+                0x71, // ADC ($20),Y
+                0x20,
+            ])
+            .build();
+
+        cpu.step();
+
+        assert_eq!(cpu.register.a, 0x30);
+    }
+
+    #[test]
     fn test_sbc_immediate_basic() {
         let mut cpu = CPUBuilder::new()
             .set_register_a(10)
@@ -191,6 +288,113 @@ mod tests_alu {
     }
 
     #[test]
+    fn test_sbc_absolute_x() {
+        let mut cpu = CPUBuilder::new()
+            .set_register_a(0x20)
+            .set_register_x(0x01)
+            .memory(0x2001, 0x05)
+            .load_program(&[
+                0xFD, // SBC Absolute,X
+                0x00,
+                0x20,
+            ])
+            .build();
+
+        cpu.status.set_flag(Flag::CARRY, true);
+
+        cpu.step();
+
+        assert_eq!(cpu.register.a, 0x1B);
+    }
+
+    #[test]
+    fn test_sbc_absolute_y() {
+        let mut cpu = CPUBuilder::new()
+            .set_register_a(0x30)
+            .set_register_y(0x02)
+            .memory(0x2002, 0x10)
+            .load_program(&[
+                0xF9, // SBC Absolute,Y
+                0x00,
+                0x20,
+            ])
+            .build();
+
+        cpu.status.set_flag(Flag::CARRY, true);
+
+        cpu.step();
+
+        assert_eq!(cpu.register.a, 0x20);
+    }
+
+    #[test]
+    fn test_sbc_zero_page_x() {
+        let mut cpu = CPUBuilder::new()
+            .set_register_a(0x15)
+            .set_register_x(0x03)
+            .memory(0x0013, 0x05)
+            .load_program(&[
+                0xF5, // SBC ZeroPage,X
+                0x10,
+            ])
+            .build();
+
+        cpu.status.set_flag(Flag::CARRY, true);
+
+        cpu.step();
+
+        assert_eq!(cpu.register.a, 0x10);
+    }
+
+    #[test]
+    fn test_sbc_indirect_x() {
+        let mut cpu = CPUBuilder::new()
+            .set_register_a(0x20)
+            .set_register_x(0x04)
+
+            .memory(0x0024, 0x10)
+            .memory(0x0025, 0x80)
+
+            .memory(0x8010, 0x05)
+
+            .load_program(&[
+                0xE1, // SBC ($20,X)
+                0x20,
+            ])
+            .build();
+
+        cpu.status.set_flag(Flag::CARRY, true);
+
+        cpu.step();
+
+        assert_eq!(cpu.register.a, 0x1B);
+    }
+
+    #[test]
+    fn test_sbc_indirect_y() {
+        let mut cpu = CPUBuilder::new()
+            .set_register_a(0x30)
+            .set_register_y(0x04)
+
+            .memory(0x0020, 0x00)
+            .memory(0x0021, 0x80)
+
+            .memory(0x8004, 0x10)
+
+            .load_program(&[
+                0xF1, // SBC ($20),Y
+                0x20,
+            ])
+            .build();
+
+        cpu.status.set_flag(Flag::CARRY, true);
+
+        cpu.step();
+
+        assert_eq!(cpu.register.a, 0x20);
+    }
+
+    #[test]
     fn test_cmp_equal() {
         let mut cpu = CPUBuilder::new()
             .set_register_a(0x05)
@@ -257,6 +461,103 @@ mod tests_alu {
 
         assert!(cpu.status.get_flag(Flag::CARRY));
         assert!(!cpu.status.get_flag(Flag::ZERO));
+    }
+
+    #[test]
+    fn test_cmp_absolute_x() {
+        let mut cpu = CPUBuilder::new()
+            .set_register_a(0x42)
+            .set_register_x(0x01)
+            .memory(0x2001, 0x42)
+            .load_program(&[
+                0xDD, // CMP Absolute,X
+                0x00,
+                0x20,
+            ])
+            .build();
+
+        cpu.step();
+
+        assert!(cpu.status.get_flag(Flag::ZERO));
+    }
+
+    #[test]
+    fn test_cmp_absolute_y() {
+        let mut cpu = CPUBuilder::new()
+            .set_register_a(0x50)
+            .set_register_y(0x02)
+            .memory(0x2002, 0x40)
+            .load_program(&[
+                0xD9, // CMP Absolute,Y
+                0x00,
+                0x20,
+            ])
+            .build();
+
+        cpu.step();
+
+        assert!(cpu.status.get_flag(Flag::CARRY));
+    }
+
+    #[test]
+    fn test_cmp_zero_page_x() {
+        let mut cpu = CPUBuilder::new()
+            .set_register_a(0x10)
+            .set_register_x(0x03)
+            .memory(0x0013, 0x20)
+            .load_program(&[
+                0xD5, // CMP ZeroPage,X
+                0x10,
+            ])
+            .build();
+
+        cpu.step();
+
+        assert!(cpu.status.get_flag(Flag::NEGATIVE));
+    }
+
+    #[test]
+    fn test_cmp_indirect_x() {
+        let mut cpu = CPUBuilder::new()
+            .set_register_a(0x42)
+            .set_register_x(0x04)
+
+            .memory(0x0024, 0x10)
+            .memory(0x0025, 0x80)
+
+            .memory(0x8010, 0x42)
+
+            .load_program(&[
+                0xC1, // CMP ($20,X)
+                0x20,
+            ])
+            .build();
+
+        cpu.step();
+
+        assert!(cpu.status.get_flag(Flag::ZERO));
+    }
+
+    #[test]
+    fn test_cmp_indirect_y() {
+        let mut cpu = CPUBuilder::new()
+            .set_register_a(0x50)
+            .set_register_y(0x04)
+
+            .memory(0x0020, 0x00)
+            .memory(0x0021, 0x80)
+
+            .memory(0x8004, 0x40)
+
+            .load_program(&[
+                0xD1, // CMP ($20),Y
+                0x20,
+            ])
+            .build();
+
+        cpu.step();
+
+        assert!(cpu.status.get_flag(Flag::CARRY));
     }
 
     #[test]

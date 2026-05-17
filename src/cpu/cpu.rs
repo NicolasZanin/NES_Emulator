@@ -16,8 +16,14 @@ pub struct CPU {
 pub enum AddressingMode {
     Immediate,
     ZeroPage,
+    ZeroPageX,
+    ZeroPageY,
     Absolute,
+    AbsoluteX,
+    AbsoluteY,
     Indirect,
+    IndirectX,
+    IndirectY,
 }
 
 // Implementation
@@ -66,10 +72,34 @@ impl CPU {
         match mode {
             AddressingMode::Immediate => self.fetch_byte() as u16,
             AddressingMode::ZeroPage => self.fetch_byte() as u16,
+            AddressingMode::ZeroPageX => {
+                let mem = self.fetch_byte();
+                mem.wrapping_add(self.register.x) as u16
+            },
+            AddressingMode::ZeroPageY => {
+                let mem = self.fetch_byte();
+                mem.wrapping_add(self.register.y) as u16
+            },
             AddressingMode::Absolute => self.read_from_pc(),
+            AddressingMode::AbsoluteX => {
+                self.read_from_pc() + self.register.x as u16
+            },
+            AddressingMode::AbsoluteY => {
+                self.read_from_pc() + self.register.y as u16
+            },
             AddressingMode::Indirect => {
                 let address_target = self.read_from_pc();
                 self.read_from_memory(address_target)
+            },
+            AddressingMode::IndirectX => {
+                let byte = self.fetch_byte();
+                let address_target = byte.wrapping_add(self.register.x) as u16;
+                self.read_from_memory(address_target)
+            },
+            AddressingMode::IndirectY => {
+                let address_target = self.fetch_byte() as u16;
+                let value = self.read_from_memory(address_target);
+                value + self.register.y as u16
             }
         }
     }
@@ -89,10 +119,20 @@ impl CPU {
         match opcode {
             0xA9 => self.lda(AddressingMode::Immediate),
             0xA5 => self.lda(AddressingMode::ZeroPage),
+            0xB5 => self.lda(AddressingMode::ZeroPageX),
             0xAD => self.lda(AddressingMode::Absolute),
+            0xBD => self.lda(AddressingMode::AbsoluteX),
+            0xB9 => self.lda(AddressingMode::AbsoluteY),
+            0xA1 => self.lda(AddressingMode::IndirectX),
+            0xB1 => self.lda(AddressingMode::IndirectY),
 
             0x85 => self.sda(AddressingMode::ZeroPage),
+            0x95 => self.sda(AddressingMode::ZeroPageX),
             0x8D => self.sda(AddressingMode::Absolute),
+            0x9D => self.sda(AddressingMode::AbsoluteX),
+            0x99 => self.sda(AddressingMode::AbsoluteY),
+            0x81 => self.sda(AddressingMode::IndirectX),
+            0x91 => self.sda(AddressingMode::IndirectY),
 
             0xAA => self.tax(),
 
@@ -100,15 +140,30 @@ impl CPU {
 
             0x69 => self.adc(AddressingMode::Immediate),
             0x65 => self.adc(AddressingMode::ZeroPage),
+            0x75 => self.adc(AddressingMode::ZeroPageX),
             0x6D => self.adc(AddressingMode::Absolute),
+            0x7D => self.adc(AddressingMode::AbsoluteX),
+            0x79 => self.adc(AddressingMode::AbsoluteY),
+            0x61 => self.adc(AddressingMode::IndirectX),
+            0x71 => self.adc(AddressingMode::IndirectY),
 
             0xE9 => self.sbc(AddressingMode::Immediate),
             0xE5 => self.sbc(AddressingMode::ZeroPage),
+            0xF5 => self.sbc(AddressingMode::ZeroPageX),
             0xED => self.sbc(AddressingMode::Absolute),
+            0xFD => self.sbc(AddressingMode::AbsoluteX),
+            0xF9 => self.sbc(AddressingMode::AbsoluteY),
+            0xE1 => self.sbc(AddressingMode::IndirectX),
+            0xF1 => self.sbc(AddressingMode::IndirectY),
 
             0xC9 => self.cmp(AddressingMode::Immediate),
             0xC5 => self.cmp(AddressingMode::ZeroPage),
+            0xD5 => self.cmp(AddressingMode::ZeroPageX),
             0xCD => self.cmp(AddressingMode::Absolute),
+            0xDD => self.cmp(AddressingMode::AbsoluteX),
+            0xD9 => self.cmp(AddressingMode::AbsoluteY),
+            0xC1 => self.cmp(AddressingMode::IndirectX),
+            0xD1 => self.cmp(AddressingMode::IndirectY),
 
             0xE0 => self.cpx(AddressingMode::Immediate),
             0xE4 => self.cpx(AddressingMode::ZeroPage),
