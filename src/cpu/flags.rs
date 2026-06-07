@@ -48,10 +48,13 @@ impl Flags {
     pub fn get_flag(&self, flag: Flag) -> bool {
         self.status & flag.bits() != 0
     }
-
-    pub fn update_zero_and_negative_flags(&mut self, result: u8) {
-        self.set_flag(Flag::ZERO, result == 0);
-        self.set_flag(Flag::NEGATIVE, result & Flag::NEGATIVE.bits() != 0);
+    
+    pub fn update_zero_flags(&mut self, value: bool) {
+        self.set_flag(Flag::ZERO, value);
+    }
+    
+    pub fn update_negative_flags(&mut self, value: bool) {
+        self.set_flag(Flag::NEGATIVE, value);
     }
 
     pub fn update_carry_flags(&mut self, value: bool) {
@@ -60,5 +63,10 @@ impl Flags {
 
     pub fn update_overflow_flags(&mut self, value: bool) {
         self.set_flag(Flag::OVERFLOW, value);
+    }
+
+    pub fn update_zero_and_negative_flags(&mut self, result: u8) {
+        self.update_zero_flags(result == 0);
+        self.update_negative_flags(result & Flag::NEGATIVE.bits() != 0);
     }
 }

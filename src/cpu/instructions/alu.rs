@@ -50,6 +50,37 @@ impl CPU {
     pub(crate) fn cpy(&mut self, mode: AddressingMode) {
         self.compare(mode, self.register.y);
     }
+
+    fn logical_op<F>(&mut self, mode: AddressingMode, op: F) where F: Fn(u8, u8) -> u8 {
+        let memory_value = self.get_operand_value(mode);
+        let acc = self.register.a;
+
+        self.register.a = op(acc, memory_value);
+
+        self.status.update_zero_and_negative_flags(self.register.a);
+    }
+
+    pub(crate) fn and(&mut self, mode: AddressingMode) {
+        self.logical_op(mode, |a, b| a & b);
+    }
+
+    pub(crate) fn ora(&mut self, mode: AddressingMode) {
+        self.logical_op(mode, |a, b| a | b);
+    }
+
+    pub(crate) fn eor(&mut self, mode: AddressingMode) {
+        self.logical_op(mode, |a, b| a ^ b);
+    }
+
+    pub(crate) fn bit(&mut self, mode: AddressingMode) {
+        let acc = self.register.a;
+        let memory = self.get_operand_value(mode);
+        let result = acc & memory;
+
+        self.status.update_zero_flags(result == 0);
+        self.status.update_overflow_flags((memory & 0x40) != 0); // 0x40 = Bit 6
+        self.status.update_negative_flags((memory & 0x80) != 0); // 0x80 = Bit 7
+    }
 }
 
 #[cfg(test)]
@@ -639,4 +670,363 @@ mod tests_alu {
         assert!(cpu.status.get_flag(Flag::NEGATIVE));
     }
 
+
+    #[test]
+    fn test_and_immediate() {
+        let mut cpu = CPUBuilder::new()
+            .set_register_a(0b1100_1100)
+            .load_program(&[
+                0x29,
+                0b1010_1010,
+            ])
+            .build();
+
+        cpu.step();
+
+        assert_eq!(cpu.register.a, 0b1000_1000);
+    }
+
+    #[test]
+    fn test_and_sets_zero_flag() {
+        let mut cpu = CPUBuilder::new()
+            .set_register_a(0b0000_1111)
+            .load_program(&[
+                0x29,
+                0b1111_0000,
+            ])
+            .build();
+
+        cpu.step();
+
+        assert_eq!(cpu.register.a, 0);
+        assert!(cpu.status.get_flag(Flag::ZERO));
+    }
+
+    #[test]
+    fn test_and_sets_negative_flag() {
+        let mut cpu = CPUBuilder::new()
+            .set_register_a(0xFF)
+            .load_program(&[
+                0x29,
+                0x80,
+            ])
+            .build();
+
+        cpu.step();
+
+        assert_eq!(cpu.register.a, 0x80);
+        assert!(cpu.status.get_flag(Flag::NEGATIVE));
+    }
+
+    #[test]
+    fn test_and_absolute_x() {
+        let mut cpu = CPUBuilder::new()
+            .set_register_a(0xFF)
+            .set_register_x(1)
+            .memory(0x2001, 0x0F)
+            .load_program(&[
+                0x3D,
+                0x00,
+                0x20,
+            ])
+            .build();
+
+        cpu.step();
+
+        assert_eq!(cpu.register.a, 0x0F);
+    }
+
+    #[test]
+    fn test_and_indirect_y() {
+        let mut cpu = CPUBuilder::new()
+            .set_register_a(0xF0)
+            .set_register_y(4)
+
+            .memory(0x0020, 0x00)
+            .memory(0x0021, 0x80)
+
+            .memory(0x8004, 0xCC)
+
+            .load_program(&[
+                0x31,
+                0x20,
+            ])
+            .build();
+
+        cpu.step();
+
+        assert_eq!(cpu.register.a, 0xC0);
+    }
+
+    #[test]
+    fn test_ora_immediate() {
+        let mut cpu = CPUBuilder::new()
+            .set_register_a(0b1100_0000)
+            .load_program(&[
+                0x09,
+                0b0000_1111,
+            ])
+            .build();
+
+        cpu.step();
+
+        assert_eq!(cpu.register.a, 0b1100_1111);
+    }
+
+    #[test]
+    fn test_ora_zero_flag() {
+        let mut cpu = CPUBuilder::new()
+            .set_register_a(0x00)
+            .load_program(&[
+                0x09,
+                0x00,
+            ])
+            .build();
+
+        cpu.step();
+
+        assert_eq!(cpu.register.a, 0x00);
+        assert!(cpu.status.get_flag(Flag::ZERO));
+    }
+
+    #[test]
+    fn test_ora_negative_flag() {
+        let mut cpu = CPUBuilder::new()
+            .set_register_a(0x80)
+            .load_program(&[
+                0x09,
+                0x01,
+            ])
+            .build();
+
+        cpu.step();
+
+        assert_eq!(cpu.register.a, 0x81);
+        assert!(cpu.status.get_flag(Flag::NEGATIVE));
+    }
+
+    #[test]
+    fn test_ora_absolute_x() {
+        let mut cpu = CPUBuilder::new()
+            .set_register_a(0xF0)
+            .set_register_x(1)
+            .memory(0x2001, 0x0F)
+            .load_program(&[
+                0x1D,
+                0x00,
+                0x20,
+            ])
+            .build();
+
+        cpu.step();
+
+        assert_eq!(cpu.register.a, 0xFF);
+    }
+
+    #[test]
+    fn test_ora_indirect_y() {
+        let mut cpu = CPUBuilder::new()
+            .set_register_a(0xF0)
+            .set_register_y(4)
+
+            .memory(0x0020, 0x00)
+            .memory(0x0021, 0x80)
+
+            .memory(0x8004, 0x0F)
+
+            .load_program(&[
+                0x11,
+                0x20,
+            ])
+            .build();
+
+        cpu.step();
+
+        assert_eq!(cpu.register.a, 0xFF);
+    }
+
+    #[test]
+    fn test_eor_immediate() {
+        let mut cpu = CPUBuilder::new()
+            .set_register_a(0b1111_0000)
+            .load_program(&[
+                0x49,
+                0b1010_1010,
+            ])
+            .build();
+
+        cpu.step();
+
+        assert_eq!(cpu.register.a, 0b0101_1010);
+    }
+
+    #[test]
+    fn test_eor_zero_flag() {
+        let mut cpu = CPUBuilder::new()
+            .set_register_a(0xFF)
+            .load_program(&[
+                0x49,
+                0xFF,
+            ])
+            .build();
+
+        cpu.step();
+
+        assert_eq!(cpu.register.a, 0x00);
+        assert!(cpu.status.get_flag(Flag::ZERO));
+    }
+
+    #[test]
+    fn test_eor_negative_flag() {
+        let mut cpu = CPUBuilder::new()
+            .set_register_a(0xFF)
+            .load_program(&[
+                0x49,
+                0x7F,
+            ])
+            .build();
+
+        cpu.step();
+
+        assert_eq!(cpu.register.a, 0x80);
+        assert!(cpu.status.get_flag(Flag::NEGATIVE));
+    }
+
+    #[test]
+    fn test_eor_absolute_x() {
+        let mut cpu = CPUBuilder::new()
+            .set_register_a(0xFF)
+            .set_register_x(1)
+            .memory(0x2001, 0x0F)
+            .load_program(&[
+                0x5D,
+                0x00,
+                0x20,
+            ])
+            .build();
+
+        cpu.step();
+
+        assert_eq!(cpu.register.a, 0xF0);
+    }
+
+    #[test]
+    fn test_eor_indirect_y() {
+        let mut cpu = CPUBuilder::new()
+            .set_register_a(0xFF)
+            .set_register_y(4)
+
+            .memory(0x0020, 0x00)
+            .memory(0x0021, 0x80)
+
+            .memory(0x8004, 0x0F)
+
+            .load_program(&[
+                0x51,
+                0x20,
+            ])
+            .build();
+
+        cpu.step();
+
+        assert_eq!(cpu.register.a, 0xF0);
+    }
+
+    #[test]
+    fn test_bit_sets_zero_flag() {
+        let mut cpu = CPUBuilder::new()
+            .set_register_a(0b0000_1111)
+            .memory(0x0010, 0b1111_0000)
+            .load_program(&[
+                0x24,
+                0x10,
+            ])
+            .build();
+
+        cpu.step();
+
+        assert!(cpu.status.get_flag(Flag::ZERO));
+    }
+
+    #[test]
+    fn test_bit_clears_zero_flag() {
+        let mut cpu = CPUBuilder::new()
+            .set_register_a(0b1111_0000)
+            .memory(0x0010, 0b1000_0000)
+            .load_program(&[
+                0x24,
+                0x10,
+            ])
+            .build();
+
+        cpu.step();
+
+        assert!(!cpu.status.get_flag(Flag::ZERO));
+    }
+
+    #[test]
+    fn test_bit_sets_negative_flag() {
+        let mut cpu = CPUBuilder::new()
+            .set_register_a(0xFF)
+            .memory(0x0010, 0x80)
+            .load_program(&[
+                0x24,
+                0x10,
+            ])
+            .build();
+
+        cpu.step();
+
+        assert!(cpu.status.get_flag(Flag::NEGATIVE));
+    }
+
+    #[test]
+    fn test_bit_sets_overflow_flag() {
+        let mut cpu = CPUBuilder::new()
+            .set_register_a(0xFF)
+            .memory(0x0010, 0x40)
+            .load_program(&[
+                0x24,
+                0x10,
+            ])
+            .build();
+
+        cpu.step();
+
+        assert!(cpu.status.get_flag(Flag::OVERFLOW));
+    }
+
+    #[test]
+    fn test_bit_does_not_modify_accumulator() {
+        let mut cpu = CPUBuilder::new()
+            .set_register_a(0x42)
+            .memory(0x0010, 0xFF)
+            .load_program(&[
+                0x24,
+                0x10,
+            ])
+            .build();
+
+        cpu.step();
+
+        assert_eq!(cpu.register.a, 0x42);
+    }
+
+    #[test]
+    fn test_bit_absolute() {
+        let mut cpu = CPUBuilder::new()
+            .set_register_a(0xFF)
+            .memory(0x2000, 0xC0)
+            .load_program(&[
+                0x2C,
+                0x00,
+                0x20,
+            ])
+            .build();
+
+        cpu.step();
+
+        assert!(cpu.status.get_flag(Flag::NEGATIVE));
+        assert!(cpu.status.get_flag(Flag::OVERFLOW));
+    }
 }

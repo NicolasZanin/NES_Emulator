@@ -138,6 +138,7 @@ impl CPU {
 
             0xE8 => self.inx(),
 
+            // ALU
             0x69 => self.adc(AddressingMode::Immediate),
             0x65 => self.adc(AddressingMode::ZeroPage),
             0x75 => self.adc(AddressingMode::ZeroPageX),
@@ -172,6 +173,36 @@ impl CPU {
             0xC0 => self.cpy(AddressingMode::Immediate),
             0xC4 => self.cpy(AddressingMode::ZeroPage),
             0xCC => self.cpy(AddressingMode::Absolute),
+
+            0x29 => self.and(AddressingMode::Immediate),
+            0x25 => self.and(AddressingMode::ZeroPage),
+            0x35 => self.and(AddressingMode::ZeroPageX),
+            0x2D => self.and(AddressingMode::Absolute),
+            0x3D => self.and(AddressingMode::AbsoluteX),
+            0x39 => self.and(AddressingMode::AbsoluteY),
+            0x21 => self.and(AddressingMode::IndirectX),
+            0x31 => self.and(AddressingMode::IndirectY),
+
+            0x09 => self.ora(AddressingMode::Immediate),
+            0x05 => self.ora(AddressingMode::ZeroPage),
+            0x15 => self.ora(AddressingMode::ZeroPageX),
+            0x0D => self.ora(AddressingMode::Absolute),
+            0x1D => self.ora(AddressingMode::AbsoluteX),
+            0x19 => self.ora(AddressingMode::AbsoluteY),
+            0x01 => self.ora(AddressingMode::IndirectX),
+            0x11 => self.ora(AddressingMode::IndirectY),
+
+            0x49 => self.eor(AddressingMode::Immediate),
+            0x45 => self.eor(AddressingMode::ZeroPage),
+            0x55 => self.eor(AddressingMode::ZeroPageX),
+            0x4D => self.eor(AddressingMode::Absolute),
+            0x5D => self.eor(AddressingMode::AbsoluteX),
+            0x59 => self.eor(AddressingMode::AbsoluteY),
+            0x41 => self.eor(AddressingMode::IndirectX),
+            0x51 => self.eor(AddressingMode::IndirectY),
+
+            0x24 => self.bit(AddressingMode::ZeroPage),
+            0x2C => self.bit(AddressingMode::Absolute),
 
             0x4C => self.jmp(AddressingMode::Absolute),
             0x6C => self.jmp(AddressingMode::Indirect),
