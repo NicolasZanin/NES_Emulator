@@ -81,6 +81,47 @@ impl CPU {
         self.status.update_overflow_flags((memory & 0x40) != 0); // 0x40 = Bit 6
         self.status.update_negative_flags((memory & 0x80) != 0); // 0x80 = Bit 7
     }
+
+    fn shift_op<F>(&mut self, mode: AddressingMode, carry_bit_mask: u8, op: F) where F: FnOnce(u8) -> u8 {
+        let (address, value) =
+            if mode == AddressingMode::Accumulator {(None, self.register.a)}
+            else {
+                let addr = self.get_operand_address(mode);
+                (Some(addr), self.memory.mem_read(addr))
+            };
+
+        let result = op(value);
+
+        match address {
+            Some(addr) => self.memory.mem_write(addr, result),
+            None => self.register.a = result,
+        }
+
+        self.status.update_carry_flags((value & carry_bit_mask) != 0);
+        self.status.update_zero_and_negative_flags(result);
+    }
+
+    pub(crate) fn asl(&mut self, mode: AddressingMode) {
+        self.shift_op(mode, 0x80, |a| a << 1);
+    }
+
+    pub(crate) fn lsr(&mut self, mode: AddressingMode) {
+        self.shift_op(mode, 0x1, |a| a >> 1);
+    }
+
+    pub(crate) fn rol(&mut self, mode: AddressingMode) {
+        let flag_set = self.status.get_flag(Flag::CARRY);
+        let bit_fill = if flag_set { 0x1u8 } else { 0 };
+
+        self.shift_op(mode, 0x80, |a| (a << 1) | bit_fill);
+    }
+
+    pub(crate) fn ror(&mut self, mode: AddressingMode) {
+        let flag_set = self.status.get_flag(Flag::CARRY);
+        let bit_fill = if flag_set { 0x80u8 } else { 0 };
+
+        self.shift_op(mode, 0x1, |a| (a >> 1) | bit_fill);
+    }
 }
 
 #[cfg(test)]
@@ -1028,5 +1069,211 @@ mod tests_alu {
 
         assert!(cpu.status.get_flag(Flag::NEGATIVE));
         assert!(cpu.status.get_flag(Flag::OVERFLOW));
+    }
+
+    #[test]
+    fn test_asl_accumulator() {
+        let mut cpu = CPUBuilder::new()
+            .set_register_a(0x01)
+            .load_program(&[0x0A])
+            .build();
+
+        cpu.step();
+
+        assert_eq!(cpu.register.a, 0x02);
+    }
+
+    #[test]
+    fn test_asl_sets_carry() {
+        let mut cpu = CPUBuilder::new()
+            .set_register_a(0x80)
+            .load_program(&[0x0A])
+            .build();
+
+        cpu.step();
+
+        assert!(cpu.status.get_flag(Flag::CARRY));
+    }
+
+    #[test]
+    fn test_asl_sets_zero() {
+        let mut cpu = CPUBuilder::new()
+            .set_register_a(0x80)
+            .load_program(&[0x0A])
+            .build();
+
+        cpu.step();
+
+        assert!(cpu.status.get_flag(Flag::ZERO));
+    }
+
+    #[test]
+    fn test_asl_zeropage() {
+        let mut cpu = CPUBuilder::new()
+            .memory(0x10, 0x02)
+            .load_program(&[
+                0x06,
+                0x10,
+            ])
+            .build();
+
+        cpu.step();
+
+        assert_eq!(cpu.memory.mem_read(0x10), 0x04);
+    }
+
+    #[test]
+    fn test_lsr_accumulator() {
+        let mut cpu = CPUBuilder::new()
+            .set_register_a(0x08)
+            .load_program(&[0x4A])
+            .build();
+
+        cpu.step();
+
+        assert_eq!(cpu.register.a, 0x04);
+    }
+
+    #[test]
+    fn test_lsr_sets_carry() {
+        let mut cpu = CPUBuilder::new()
+            .set_register_a(0x01)
+            .load_program(&[0x4A])
+            .build();
+
+        cpu.step();
+
+        assert!(cpu.status.get_flag(Flag::CARRY));
+    }
+
+    #[test]
+    fn test_lsr_clears_negative() {
+        let mut cpu = CPUBuilder::new()
+            .set_register_a(0xFF)
+            .load_program(&[0x4A])
+            .build();
+
+        cpu.step();
+
+        assert!(!cpu.status.get_flag(Flag::NEGATIVE));
+    }
+
+    #[test]
+    fn test_lsr_zeropage() {
+        let mut cpu = CPUBuilder::new()
+            .memory(0x10, 0x08)
+            .load_program(&[
+                0x46,
+                0x10,
+            ])
+            .build();
+
+        cpu.step();
+
+        assert_eq!(cpu.memory.mem_read(0x10), 0x04);
+    }
+
+    #[test]
+    fn test_rol_accumulator() {
+        let mut cpu = CPUBuilder::new()
+            .set_register_a(0x01)
+            .load_program(&[0x2A])
+            .build();
+
+        cpu.step();
+
+        assert_eq!(cpu.register.a, 0x02);
+    }
+
+    #[test]
+    fn test_rol_uses_carry() {
+        let mut cpu = CPUBuilder::new()
+            .set_register_a(0x01)
+            .set_flags(Flag::CARRY)
+            .load_program(&[0x2A])
+            .build();
+
+        cpu.step();
+
+        assert_eq!(cpu.register.a, 0x03);
+    }
+
+    #[test]
+    fn test_rol_sets_carry() {
+        let mut cpu = CPUBuilder::new()
+            .set_register_a(0x80)
+            .load_program(&[0x2A])
+            .build();
+
+        cpu.step();
+
+        assert!(cpu.status.get_flag(Flag::CARRY));
+    }
+
+    #[test]
+    fn test_rol_zeropage() {
+        let mut cpu = CPUBuilder::new()
+            .memory(0x10, 0x40)
+            .load_program(&[
+                0x26,
+                0x10,
+            ])
+            .build();
+
+        cpu.step();
+
+        assert_eq!(cpu.memory.mem_read(0x10), 0x80);
+    }
+
+    #[test]
+    fn test_ror_accumulator() {
+        let mut cpu = CPUBuilder::new()
+            .set_register_a(0x08)
+            .load_program(&[0x6A])
+            .build();
+
+        cpu.step();
+
+        assert_eq!(cpu.register.a, 0x04);
+    }
+
+    #[test]
+    fn test_ror_uses_carry() {
+        let mut cpu = CPUBuilder::new()
+            .set_register_a(0x00)
+            .set_flags(Flag::CARRY)
+            .load_program(&[0x6A])
+            .build();
+
+        cpu.step();
+
+        assert_eq!(cpu.register.a, 0x80);
+    }
+
+    #[test]
+    fn test_ror_sets_carry() {
+        let mut cpu = CPUBuilder::new()
+            .set_register_a(0x01)
+            .load_program(&[0x6A])
+            .build();
+
+        cpu.step();
+
+        assert!(cpu.status.get_flag(Flag::CARRY));
+    }
+
+    #[test]
+    fn test_ror_zeropage() {
+        let mut cpu = CPUBuilder::new()
+            .memory(0x10, 0x08)
+            .load_program(&[
+                0x66,
+                0x10,
+            ])
+            .build();
+
+        cpu.step();
+
+        assert_eq!(cpu.memory.mem_read(0x10), 0x04);
     }
 }

@@ -12,9 +12,10 @@ pub struct CPU {
     pub(crate) memory: Memory,
 }
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, PartialEq)]
 pub enum AddressingMode {
     Immediate,
+    Accumulator,
     ZeroPage,
     ZeroPageX,
     ZeroPageY,
@@ -70,6 +71,7 @@ impl CPU {
 
     pub(crate) fn get_operand_address(&mut self, mode: AddressingMode) -> u16 {
         match mode {
+            AddressingMode::Accumulator => panic!("Impossible to get operand address of accumulator"),
             AddressingMode::Immediate => self.fetch_byte() as u16,
             AddressingMode::ZeroPage => self.fetch_byte() as u16,
             AddressingMode::ZeroPageX => {
@@ -203,6 +205,30 @@ impl CPU {
 
             0x24 => self.bit(AddressingMode::ZeroPage),
             0x2C => self.bit(AddressingMode::Absolute),
+
+            0x0A => self.asl(AddressingMode::Accumulator),
+            0x06 => self.asl(AddressingMode::ZeroPage),
+            0x16 => self.asl(AddressingMode::ZeroPageX),
+            0x0E => self.asl(AddressingMode::Absolute),
+            0x1E => self.asl(AddressingMode::AbsoluteX),
+
+            0x4A => self.lsr(AddressingMode::Accumulator),
+            0x46 => self.lsr(AddressingMode::ZeroPage),
+            0x56 => self.lsr(AddressingMode::ZeroPageX),
+            0x4E => self.lsr(AddressingMode::Absolute),
+            0x5E => self.lsr(AddressingMode::AbsoluteX),
+
+            0x2A => self.rol(AddressingMode::Accumulator),
+            0x26 => self.rol(AddressingMode::ZeroPage),
+            0x36 => self.rol(AddressingMode::ZeroPageX),
+            0x2E => self.rol(AddressingMode::Absolute),
+            0x3E => self.rol(AddressingMode::AbsoluteX),
+
+            0x6A => self.ror(AddressingMode::Accumulator),
+            0x66 => self.ror(AddressingMode::ZeroPage),
+            0x76 => self.ror(AddressingMode::ZeroPageX),
+            0x6E => self.ror(AddressingMode::Absolute),
+            0x7E => self.ror(AddressingMode::AbsoluteX),
 
             0x4C => self.jmp(AddressingMode::Absolute),
             0x6C => self.jmp(AddressingMode::Indirect),
