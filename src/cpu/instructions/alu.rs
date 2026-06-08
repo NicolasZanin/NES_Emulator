@@ -83,13 +83,7 @@ impl CPU {
     }
 
     fn shift_op<F>(&mut self, mode: AddressingMode, carry_bit_mask: u8, op: F) where F: FnOnce(u8) -> u8 {
-        let (address, value) =
-            if mode == AddressingMode::Accumulator {(None, self.register.a)}
-            else {
-                let addr = self.get_operand_address(mode);
-                (Some(addr), self.memory.mem_read(addr))
-            };
-
+        let (address, value) = self.get_operand(mode);
         let result = op(value);
 
         match address {

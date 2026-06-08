@@ -115,6 +115,15 @@ impl CPU {
         }
     }
 
+    pub(crate) fn get_operand(&mut self, mode: AddressingMode) -> (Option<u16>, u8) {
+        if mode == AddressingMode::Accumulator {
+            return (None, self.register.a);
+        }
+
+        let addr = self.get_operand_address(mode);
+        (Some(addr), self.memory.mem_read(addr))
+    }
+
     pub fn step(&mut self) {
         let opcode = self.fetch_byte();
 
@@ -138,7 +147,24 @@ impl CPU {
 
             0xAA => self.tax(),
 
+            // Increment
+            0xE6 => self.inc(AddressingMode::ZeroPage),
+            0xF6 => self.inc(AddressingMode::ZeroPageX),
+            0xEE => self.inc(AddressingMode::Absolute),
+            0xFE => self.inc(AddressingMode::AbsoluteX),
+
             0xE8 => self.inx(),
+
+            0xC8 => self.iny(),
+
+            0xC6 => self.dec(AddressingMode::ZeroPage),
+            0xD6 => self.dec(AddressingMode::ZeroPageX),
+            0xCE => self.dec(AddressingMode::Absolute),
+            0xDE => self.dec(AddressingMode::AbsoluteX),
+
+            0xCA => self.dex(),
+
+            0x88 => self.dey(),
 
             // ALU
             0x69 => self.adc(AddressingMode::Immediate),
