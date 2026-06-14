@@ -128,6 +128,7 @@ impl CPU {
         let opcode = self.fetch_byte();
 
         match opcode {
+            // Load & Store
             0xA9 => self.lda(AddressingMode::Immediate),
             0xA5 => self.lda(AddressingMode::ZeroPage),
             0xB5 => self.lda(AddressingMode::ZeroPageX),
@@ -137,13 +138,33 @@ impl CPU {
             0xA1 => self.lda(AddressingMode::IndirectX),
             0xB1 => self.lda(AddressingMode::IndirectY),
 
-            0x85 => self.sda(AddressingMode::ZeroPage),
-            0x95 => self.sda(AddressingMode::ZeroPageX),
-            0x8D => self.sda(AddressingMode::Absolute),
-            0x9D => self.sda(AddressingMode::AbsoluteX),
-            0x99 => self.sda(AddressingMode::AbsoluteY),
-            0x81 => self.sda(AddressingMode::IndirectX),
-            0x91 => self.sda(AddressingMode::IndirectY),
+            0xA2 => self.ldx(AddressingMode::Immediate),
+            0xA6 => self.ldx(AddressingMode::ZeroPage),
+            0xB6 => self.ldx(AddressingMode::ZeroPageY),
+            0xAE => self.ldx(AddressingMode::Absolute),
+            0xBE => self.ldx(AddressingMode::AbsoluteY),
+
+            0xA0 => self.ldy(AddressingMode::Immediate),
+            0xA4 => self.ldy(AddressingMode::ZeroPage),
+            0xB4 => self.ldy(AddressingMode::ZeroPageY),
+            0xAC => self.ldy(AddressingMode::Absolute),
+            0xBC => self.ldy(AddressingMode::AbsoluteY),
+
+            0x85 => self.sta(AddressingMode::ZeroPage),
+            0x95 => self.sta(AddressingMode::ZeroPageX),
+            0x8D => self.sta(AddressingMode::Absolute),
+            0x9D => self.sta(AddressingMode::AbsoluteX),
+            0x99 => self.sta(AddressingMode::AbsoluteY),
+            0x81 => self.sta(AddressingMode::IndirectX),
+            0x91 => self.sta(AddressingMode::IndirectY),
+
+            0x86 => self.stx(AddressingMode::ZeroPage),
+            0x96 => self.stx(AddressingMode::ZeroPageX),
+            0x8E => self.stx(AddressingMode::Absolute),
+
+            0x84 => self.sty(AddressingMode::ZeroPage),
+            0x94 => self.sty(AddressingMode::ZeroPageX),
+            0x8C => self.sty(AddressingMode::Absolute),
 
             0xAA => self.tax(),
 

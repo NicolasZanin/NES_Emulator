@@ -1,15 +1,40 @@
 use crate::cpu::cpu::{AddressingMode, CPU};
 
 impl CPU {
-    pub(crate) fn lda(&mut self, mode: AddressingMode) {
+    fn load(&mut self, mode: AddressingMode) -> u8 {
         let value = self.get_operand_value(mode);
-        self.register.a = value;
-        self.status.update_zero_and_negative_flags(self.register.a);
+        self.status.update_zero_and_negative_flags(value);
+
+        value
     }
 
-    pub(crate) fn sda(&mut self, mode: AddressingMode) {
+    fn store(&mut self, register: u8, mode: AddressingMode) {
         let address = self.get_operand_address(mode);
-        self.memory.mem_write(address, self.register.a);
+        self.memory.mem_write(address, register);
+    }
+
+    pub(crate) fn lda(&mut self, mode: AddressingMode) {
+        self.register.a = self.load(mode);
+    }
+
+    pub(crate) fn ldx(&mut self, mode: AddressingMode) {
+        self.register.x = self.load(mode);
+    }
+
+    pub(crate) fn ldy(&mut self, mode: AddressingMode) {
+        self.register.y = self.load(mode);
+    }
+
+    pub(crate) fn sta(&mut self, mode: AddressingMode) {
+        self.store(self.register.a, mode);
+    }
+
+    pub(crate) fn stx(&mut self, mode: AddressingMode) {
+        self.store(self.register.x, mode);
+    }
+
+    pub(crate) fn sty(&mut self, mode: AddressingMode) {
+        self.store(self.register.y, mode);
     }
 }
 
@@ -43,6 +68,90 @@ mod tests_load_store {
 
         assert_eq!(cpu.register.a, 0x99);
         assert!(!cpu.status.get_flag(Flag::ZERO));
+        assert!(cpu.status.get_flag(Flag::NEGATIVE));
+    }
+
+    #[test]
+    fn test_ldx_immediate_loads_value() {
+        let mut cpu = CPUBuilder::new()
+            .load_program(&[
+                0xA2,
+                0x42,
+            ])
+            .build();
+
+        cpu.step();
+
+        assert_eq!(cpu.register.x, 0x42);
+    }
+
+    #[test]
+    fn test_ldx_sets_zero_flag() {
+        let mut cpu = CPUBuilder::new()
+            .load_program(&[
+                0xA2,
+                0x00,
+            ])
+            .build();
+
+        cpu.step();
+
+        assert!(cpu.status.get_flag(Flag::ZERO));
+    }
+
+    #[test]
+    fn test_ldx_sets_negative_flag() {
+        let mut cpu = CPUBuilder::new()
+            .load_program(&[
+                0xA2,
+                0x80,
+            ])
+            .build();
+
+        cpu.step();
+
+        assert!(cpu.status.get_flag(Flag::NEGATIVE));
+    }
+
+    #[test]
+    fn test_ldy_immediate_loads_value() {
+        let mut cpu = CPUBuilder::new()
+            .load_program(&[
+                0xA0,
+                0x37,
+            ])
+            .build();
+
+        cpu.step();
+
+        assert_eq!(cpu.register.y, 0x37);
+    }
+
+    #[test]
+    fn test_ldy_sets_zero_flag() {
+        let mut cpu = CPUBuilder::new()
+            .load_program(&[
+                0xA0,
+                0x00,
+            ])
+            .build();
+
+        cpu.step();
+
+        assert!(cpu.status.get_flag(Flag::ZERO));
+    }
+
+    #[test]
+    fn test_ldy_sets_negative_flag() {
+        let mut cpu = CPUBuilder::new()
+            .load_program(&[
+                0xA0,
+                0x80,
+            ])
+            .build();
+
+        cpu.step();
+
         assert!(cpu.status.get_flag(Flag::NEGATIVE));
     }
 
@@ -282,5 +391,67 @@ mod tests_load_store {
         cpu.step();
 
         assert_eq!(cpu.memory.mem_read(0x0015), 0x77);
+    }
+
+    #[test]
+    fn test_stx_zeropage_stores_x() {
+        let mut cpu = CPUBuilder::new()
+            .set_register_x(0x55)
+            .load_program(&[
+                0x86,
+                0x10,
+            ])
+            .build();
+
+        cpu.step();
+
+        assert_eq!(cpu.memory.mem_read(0x10), 0x55);
+    }
+
+    #[test]
+    fn test_stx_absolute_stores_x() {
+        let mut cpu = CPUBuilder::new()
+            .set_register_x(0xAA)
+            .load_program(&[
+                0x8E,
+                0x00,
+                0x20,
+            ])
+            .build();
+
+        cpu.step();
+
+        assert_eq!(cpu.memory.mem_read(0x2000), 0xAA);
+    }
+
+    #[test]
+    fn test_sty_zeropage_stores_y() {
+        let mut cpu = CPUBuilder::new()
+            .set_register_y(0x77)
+            .load_program(&[
+                0x84,
+                0x10,
+            ])
+            .build();
+
+        cpu.step();
+
+        assert_eq!(cpu.memory.mem_read(0x10), 0x77);
+    }
+
+    #[test]
+    fn test_sty_absolute_stores_y() {
+        let mut cpu = CPUBuilder::new()
+            .set_register_y(0xCC)
+            .load_program(&[
+                0x8C,
+                0x00,
+                0x20,
+            ])
+            .build();
+
+        cpu.step();
+
+        assert_eq!(cpu.memory.mem_read(0x2000), 0xCC);
     }
 }
