@@ -5,3 +5,4 @@ mod stack;
 mod load_store;
 mod interrupt;
 mod branch;
+mod flag;

@@ -146,9 +146,9 @@ impl CPU {
 
             0xA0 => self.ldy(AddressingMode::Immediate),
             0xA4 => self.ldy(AddressingMode::ZeroPage),
-            0xB4 => self.ldy(AddressingMode::ZeroPageY),
+            0xB4 => self.ldy(AddressingMode::ZeroPageX),
             0xAC => self.ldy(AddressingMode::Absolute),
-            0xBC => self.ldy(AddressingMode::AbsoluteY),
+            0xBC => self.ldy(AddressingMode::AbsoluteX),
 
             0x85 => self.sta(AddressingMode::ZeroPage),
             0x95 => self.sta(AddressingMode::ZeroPageX),
@@ -159,7 +159,7 @@ impl CPU {
             0x91 => self.sta(AddressingMode::IndirectY),
 
             0x86 => self.stx(AddressingMode::ZeroPage),
-            0x96 => self.stx(AddressingMode::ZeroPageX),
+            0x96 => self.stx(AddressingMode::ZeroPageY),
             0x8E => self.stx(AddressingMode::Absolute),
 
             0x84 => self.sty(AddressingMode::ZeroPage),
@@ -286,6 +286,15 @@ impl CPU {
             0x4C => self.jmp(AddressingMode::Absolute),
             0x6C => self.jmp(AddressingMode::Indirect),
 
+            // Flag
+            0x18 => self.clc(),
+            0xD8 => self.cld(),
+            0x58 => self.cli(),
+            0xB8 => self.clv(),
+            0x38 => self.sec(),
+            0xF8 => self.sed(),
+            0x78 => self.sei(),
+
             // Branching
             0xF0 => self.beq(),
             0xD0 => self.bne(),
@@ -306,6 +315,9 @@ impl CPU {
 
             0x00 => self.brk(),
             0x40 => self.rti(),
+
+            // NOP Instruction
+            0xEA => (),
 
             _ => panic!("This opcode is not supposed to be used."),
         }

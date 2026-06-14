@@ -57,6 +57,14 @@ impl Flags {
         self.set_flag(Flag::NEGATIVE, value);
     }
 
+    pub fn update_interrupt_flags(&mut self, value: bool) {
+        self.set_flag(Flag::INTERRUPT, value);
+    }
+
+    pub fn update_decimal_flags(&mut self, value: bool) {
+        self.set_flag(Flag::DECIMAL, value);
+    }
+
     pub fn update_carry_flags(&mut self, value: bool) {
         self.set_flag(Flag::CARRY, value);
     }
