@@ -15,6 +15,10 @@ impl Stack {
         self.stack_pointer
     }
 
+    pub fn set(&mut self, value: u8) {
+        self.stack_pointer = value;
+    }
+
     fn current_address(&self) -> u16 {
         STACK_BASE + (self.stack_pointer as u16)
     }

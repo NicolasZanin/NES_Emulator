@@ -166,7 +166,13 @@ impl CPU {
             0x94 => self.sty(AddressingMode::ZeroPageX),
             0x8C => self.sty(AddressingMode::Absolute),
 
+            // Transfer
             0xAA => self.tax(),
+            0xA8 => self.tay(),
+            0xBA => self.tsx(),
+            0x8A => self.txa(),
+            0x9A => self.txs(),
+            0x98 => self.tya(),
 
             // Increment
             0xE6 => self.inc(AddressingMode::ZeroPage),
