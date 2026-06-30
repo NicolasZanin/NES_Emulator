@@ -14,6 +14,8 @@ pub struct CPU {
 
 #[derive(Copy, Clone, PartialEq)]
 pub enum AddressingMode {
+    Implied,
+    Relative,
     Immediate,
     Accumulator,
     ZeroPage,
@@ -26,6 +28,273 @@ pub enum AddressingMode {
     IndirectX,
     IndirectY,
 }
+
+#[derive(Copy, Clone)]
+pub enum Instruction {
+    LDA,
+    LDX,
+    LDY,
+    STA,
+    STX,
+    STY,
+    TAX,
+    TAY,
+    TSX,
+    TXA,
+    TXS,
+    TYA,
+    INC,
+    INX,
+    INY,
+    DEC,
+    DEX,
+    DEY,
+    ADC,
+    SBC,
+    CMP,
+    CPX,
+    CPY,
+    AND,
+    ORA,
+    EOR,
+    BIT,
+    ASL,
+    LSR,
+    ROL,
+    ROR,
+    JMP,
+    CLC,
+    CLD,
+    CLI,
+    CLV,
+    SEC,
+    SED,
+    SEI,
+    BEQ,
+    BNE,
+    BCC,
+    BCS,
+    BVC,
+    BVS,
+    BMI,
+    BPL,
+    PHA,
+    PLA,
+    PHP,
+    PLP,
+    JSR,
+    RTS,
+    BRK,
+    RTI,
+    NOP
+}
+
+#[derive(Copy, Clone)]
+pub struct Opcode {
+    pub instruction: Instruction,
+    pub mode: AddressingMode,
+    pub cycles: u8,
+}
+
+
+const ILLEGAL: Opcode = Opcode {
+    instruction: Instruction::NOP,
+    mode: AddressingMode::Implied,
+    cycles: 0,
+};
+
+const fn op(instruction: Instruction, mode: AddressingMode, cycles: u8) -> Opcode {
+    Opcode { instruction, mode, cycles }
+}
+
+const fn build_table() -> [Opcode; 256] {
+    let mut table = [ILLEGAL; 256];
+
+    table[0xA9] = op(Instruction::LDA, AddressingMode::Immediate, 2);
+    table[0xA5] = op(Instruction::LDA, AddressingMode::ZeroPage, 3);
+    table[0xB5] = op(Instruction::LDA, AddressingMode::ZeroPageX, 4);
+    table[0xAD] = op(Instruction::LDA, AddressingMode::Absolute, 4);
+    table[0xBD] = op(Instruction::LDA, AddressingMode::AbsoluteX, 4);
+    table[0xB9] = op(Instruction::LDA, AddressingMode::AbsoluteY, 4);
+    table[0xA1] = op(Instruction::LDA, AddressingMode::IndirectX, 6);
+    table[0xB1] = op(Instruction::LDA, AddressingMode::IndirectY, 5);
+
+    table[0xA2] = op(Instruction::LDX, AddressingMode::Immediate, 2);
+    table[0xA6] = op(Instruction::LDX, AddressingMode::ZeroPage, 3);
+    table[0xB6] = op(Instruction::LDX, AddressingMode::ZeroPageY, 4);
+    table[0xAE] = op(Instruction::LDX, AddressingMode::Absolute, 4);
+    table[0xBE] = op(Instruction::LDX, AddressingMode::AbsoluteY, 4);
+
+    table[0xA0] = op(Instruction::LDY, AddressingMode::Immediate, 2);
+    table[0xA4] = op(Instruction::LDX, AddressingMode::ZeroPage, 3);
+    table[0xB4] = op(Instruction::LDX, AddressingMode::ZeroPageX, 4);
+    table[0xAC] = op(Instruction::LDX, AddressingMode::Absolute, 4);
+    table[0xBC] = op(Instruction::LDX, AddressingMode::AbsoluteX, 4);
+
+    table[0x85] = op(Instruction::STA, AddressingMode::ZeroPage, 3);
+    table[0x95] = op(Instruction::STA, AddressingMode::ZeroPageX, 4);
+    table[0x8D] = op(Instruction::STA, AddressingMode::Absolute, 4);
+    table[0x9D] = op(Instruction::STA, AddressingMode::AbsoluteX, 5);
+    table[0x99] = op(Instruction::STA, AddressingMode::AbsoluteY, 5);
+    table[0x81] = op(Instruction::STA, AddressingMode::IndirectX, 6);
+    table[0x91] = op(Instruction::STA, AddressingMode::IndirectY, 6);
+
+    table[0x86] = op(Instruction::STX, AddressingMode::ZeroPage, 3);
+    table[0x96] = op(Instruction::STX, AddressingMode::ZeroPageY, 4);
+    table[0x8E] = op(Instruction::STX, AddressingMode::Absolute, 4);
+
+    table[0x84] = op(Instruction::STY, AddressingMode::ZeroPage, 3);
+    table[0x94] = op(Instruction::STY, AddressingMode::ZeroPageX, 4);
+    table[0x8C] = op(Instruction::STY, AddressingMode::Absolute, 4);
+
+    table[0xAA] = op(Instruction::TAX, AddressingMode::Implied, 2);
+    table[0xA8] = op(Instruction::TAY, AddressingMode::Implied, 2);
+    table[0xBA] = op(Instruction::TSX, AddressingMode::Implied, 2);
+    table[0x8A] = op(Instruction::TXA, AddressingMode::Implied, 2);
+    table[0x9A] = op(Instruction::TXS, AddressingMode::Implied, 2);
+    table[0x98] = op(Instruction::TYA, AddressingMode::Implied, 2);
+
+    table[0xE6] = op(Instruction::INC, AddressingMode::ZeroPage, 5);
+    table[0xF6] = op(Instruction::INC, AddressingMode::ZeroPageX, 6);
+    table[0xEE] = op(Instruction::INC, AddressingMode::Absolute, 6);
+    table[0xFE] = op(Instruction::INC, AddressingMode::AbsoluteX, 7);
+    table[0xE8] = op(Instruction::INX, AddressingMode::Implied, 2);
+    table[0xC8] = op(Instruction::INY, AddressingMode::Implied, 2);
+
+    table[0xC6] = op(Instruction::DEC, AddressingMode::ZeroPage, 5);
+    table[0xD6] = op(Instruction::DEC, AddressingMode::ZeroPageX, 6);
+    table[0xCE] = op(Instruction::DEC, AddressingMode::Absolute, 6);
+    table[0xDE] = op(Instruction::DEC, AddressingMode::AbsoluteX, 7);
+    table[0xCA] = op(Instruction::DEX, AddressingMode::Implied, 2);
+    table[0x88] = op(Instruction::DEY, AddressingMode::Implied, 2);
+
+    table[0x69] = op(Instruction::ADC, AddressingMode::Immediate, 2);
+    table[0x65] = op(Instruction::ADC, AddressingMode::ZeroPage, 3);
+    table[0x75] = op(Instruction::ADC, AddressingMode::ZeroPageX, 4);
+    table[0x6D] = op(Instruction::ADC, AddressingMode::Absolute, 4);
+    table[0x7D] = op(Instruction::ADC, AddressingMode::AbsoluteX, 4);
+    table[0x79] = op(Instruction::ADC, AddressingMode::AbsoluteY, 4);
+    table[0x61] = op(Instruction::ADC, AddressingMode::IndirectX, 6);
+    table[0x71] = op(Instruction::ADC, AddressingMode::IndirectY, 5);
+
+    table[0xE9] = op(Instruction::SBC, AddressingMode::Immediate, 2);
+    table[0xE5] = op(Instruction::SBC, AddressingMode::ZeroPage, 3);
+    table[0xF5] = op(Instruction::SBC, AddressingMode::ZeroPageX, 4);
+    table[0xED] = op(Instruction::SBC, AddressingMode::Absolute, 4);
+    table[0xFD] = op(Instruction::SBC, AddressingMode::AbsoluteX, 4);
+    table[0xF9] = op(Instruction::SBC, AddressingMode::AbsoluteY, 4);
+    table[0xE1] = op(Instruction::SBC, AddressingMode::IndirectX, 6);
+    table[0xF1] = op(Instruction::SBC, AddressingMode::IndirectY, 5);
+
+    table[0xC9] = op(Instruction::CMP, AddressingMode::Immediate, 2);
+    table[0xC5] = op(Instruction::CMP, AddressingMode::ZeroPage, 3);
+    table[0xD5] = op(Instruction::CMP, AddressingMode::ZeroPageX, 4);
+    table[0xCD] = op(Instruction::CMP, AddressingMode::Absolute, 4);
+    table[0xDD] = op(Instruction::CMP, AddressingMode::AbsoluteX, 4);
+    table[0xD9] = op(Instruction::CMP, AddressingMode::AbsoluteY, 4);
+    table[0xC1] = op(Instruction::CMP, AddressingMode::IndirectX, 6);
+    table[0xD1] = op(Instruction::CMP, AddressingMode::IndirectY, 5);
+
+    table[0xE0] = op(Instruction::CPX, AddressingMode::Immediate, 2);
+    table[0xE4] = op(Instruction::CPX, AddressingMode::ZeroPage, 3);
+    table[0xEC] = op(Instruction::CPX, AddressingMode::Absolute, 4);
+
+    table[0xC0] = op(Instruction::CPY, AddressingMode::Immediate, 2);
+    table[0xC4] = op(Instruction::CPY, AddressingMode::ZeroPage, 3);
+    table[0xCC] = op(Instruction::CPY, AddressingMode::Absolute, 4);
+
+    table[0x29] = op(Instruction::AND, AddressingMode::Immediate, 2);
+    table[0x25] = op(Instruction::AND, AddressingMode::ZeroPage, 3);
+    table[0x35] = op(Instruction::AND, AddressingMode::ZeroPageX, 4);
+    table[0x2D] = op(Instruction::AND, AddressingMode::Absolute, 4);
+    table[0x3D] = op(Instruction::AND, AddressingMode::AbsoluteX, 4);
+    table[0x39] = op(Instruction::AND, AddressingMode::AbsoluteY, 4);
+    table[0x21] = op(Instruction::AND, AddressingMode::IndirectX, 6);
+    table[0x31] = op(Instruction::AND, AddressingMode::IndirectY, 5);
+
+    table[0x09] = op(Instruction::ORA, AddressingMode::Immediate, 2);
+    table[0x05] = op(Instruction::ORA, AddressingMode::ZeroPage, 3);
+    table[0x15] = op(Instruction::ORA, AddressingMode::ZeroPageX, 4);
+    table[0x0D] = op(Instruction::ORA, AddressingMode::Absolute, 4);
+    table[0x1D] = op(Instruction::ORA, AddressingMode::AbsoluteX, 4);
+    table[0x19] = op(Instruction::ORA, AddressingMode::AbsoluteY, 4);
+    table[0x01] = op(Instruction::ORA, AddressingMode::IndirectX, 6);
+    table[0x11] = op(Instruction::ORA, AddressingMode::IndirectY, 5);
+
+    table[0x49] = op(Instruction::EOR, AddressingMode::Immediate, 2);
+    table[0x45] = op(Instruction::EOR, AddressingMode::ZeroPage, 3);
+    table[0x55] = op(Instruction::EOR, AddressingMode::ZeroPageX, 4);
+    table[0x4D] = op(Instruction::EOR, AddressingMode::Absolute, 4);
+    table[0x5D] = op(Instruction::EOR, AddressingMode::AbsoluteX, 4);
+    table[0x59] = op(Instruction::EOR, AddressingMode::AbsoluteY, 4);
+    table[0x41] = op(Instruction::EOR, AddressingMode::IndirectX, 6);
+    table[0x51] = op(Instruction::EOR, AddressingMode::IndirectY, 5);
+
+    table[0x24] = op(Instruction::BIT, AddressingMode::ZeroPage, 3);
+    table[0x2C] = op(Instruction::BIT, AddressingMode::Absolute, 4);
+
+    table[0x0A] = op(Instruction::ASL, AddressingMode::Accumulator, 2);
+    table[0x06] = op(Instruction::ASL, AddressingMode::ZeroPage, 5);
+    table[0x16] = op(Instruction::ASL, AddressingMode::ZeroPageX, 6);
+    table[0x0E] = op(Instruction::ASL, AddressingMode::Absolute, 6);
+    table[0x1E] = op(Instruction::ASL, AddressingMode::AbsoluteX, 7);
+
+    table[0x4A] = op(Instruction::LSR, AddressingMode::Accumulator, 2);
+    table[0x46] = op(Instruction::LSR, AddressingMode::ZeroPage, 5);
+    table[0x56] = op(Instruction::LSR, AddressingMode::ZeroPageX, 6);
+    table[0x4E] = op(Instruction::LSR, AddressingMode::Absolute, 6);
+    table[0x5E] = op(Instruction::LSR, AddressingMode::AbsoluteX, 7);
+
+    table[0x2A] = op(Instruction::ROL, AddressingMode::Accumulator, 2);
+    table[0x26] = op(Instruction::ROL, AddressingMode::ZeroPage, 5);
+    table[0x36] = op(Instruction::ROL, AddressingMode::ZeroPageX, 6);
+    table[0x2E] = op(Instruction::ROL, AddressingMode::Absolute, 6);
+    table[0x3E] = op(Instruction::ROL, AddressingMode::AbsoluteX, 7);
+
+    table[0x6A] = op(Instruction::ROR, AddressingMode::Accumulator, 2);
+    table[0x66] = op(Instruction::ROR, AddressingMode::ZeroPage, 5);
+    table[0x76] = op(Instruction::ROR, AddressingMode::ZeroPageX, 6);
+    table[0x6E] = op(Instruction::ROR, AddressingMode::Absolute, 6);
+    table[0x7E] = op(Instruction::ROR, AddressingMode::AbsoluteX, 7);
+
+    table[0x4C] = op(Instruction::JMP, AddressingMode::Absolute, 3);
+    table[0x6C] = op(Instruction::JMP, AddressingMode::Indirect, 5);
+
+    table[0x18] = op(Instruction::CLC, AddressingMode::Implied, 2);
+    table[0xD8] = op(Instruction::CLD, AddressingMode::Implied, 2);
+    table[0x58] = op(Instruction::CLI, AddressingMode::Implied, 2);
+    table[0xB8] = op(Instruction::CLV, AddressingMode::Implied, 2);
+    table[0x38] = op(Instruction::SEC, AddressingMode::Implied, 2);
+    table[0xF8] = op(Instruction::SED, AddressingMode::Implied, 2);
+    table[0x78] = op(Instruction::SEI, AddressingMode::Implied, 2);
+
+    table[0xF0] = op(Instruction::BEQ, AddressingMode::Relative, 2);
+    table[0xD0] = op(Instruction::BNE, AddressingMode::Relative, 2);
+    table[0x90] = op(Instruction::BCC, AddressingMode::Relative, 2);
+    table[0xB0] = op(Instruction::BCS, AddressingMode::Relative, 2);
+    table[0x50] = op(Instruction::BVC, AddressingMode::Relative, 2);
+    table[0x70] = op(Instruction::BVS, AddressingMode::Relative, 2);
+    table[0x30] = op(Instruction::BMI, AddressingMode::Relative, 2);
+    table[0x10] = op(Instruction::BPL, AddressingMode::Relative, 2);
+
+    table[0x48] = op(Instruction::PHA, AddressingMode::Implied, 3);
+    table[0x68] = op(Instruction::PLA, AddressingMode::Implied, 4);
+    table[0x08] = op(Instruction::PHP, AddressingMode::Implied, 3);
+    table[0x28] = op(Instruction::PLP, AddressingMode::Implied, 4);
+
+    table[0x20] = op(Instruction::JSR, AddressingMode::Absolute, 6);
+    table[0x60] = op(Instruction::RTS, AddressingMode::Implied, 6);
+
+    table[0x00] = op(Instruction::BRK, AddressingMode::Implied, 7);
+    table[0x40] = op(Instruction::RTI, AddressingMode::Implied, 6);
+    table[0xEA] = op(Instruction::RTI, AddressingMode::Implied, 2);
+
+
+    table
+}
+
+pub static OPCODES: [Opcode; 256] = build_table();
+
 
 // Implementation
 impl CPU {
@@ -71,6 +340,8 @@ impl CPU {
 
     pub(crate) fn get_operand_address(&mut self, mode: AddressingMode) -> u16 {
         match mode {
+            AddressingMode::Implied => panic!("Impossible to get operand address of accumulator"),
+            AddressingMode::Relative => panic!("Impossible to get operand address of accumulator"),
             AddressingMode::Accumulator => panic!("Impossible to get operand address of accumulator"),
             AddressingMode::Immediate => self.fetch_byte() as u16,
             AddressingMode::ZeroPage => self.fetch_byte() as u16,
@@ -125,201 +396,66 @@ impl CPU {
     }
 
     pub fn step(&mut self) {
-        let opcode = self.fetch_byte();
+        let byte = self.fetch_byte();
+        let opcode = OPCODES[byte as usize];
 
-        match opcode {
-            // Load & Store
-            0xA9 => self.lda(AddressingMode::Immediate),
-            0xA5 => self.lda(AddressingMode::ZeroPage),
-            0xB5 => self.lda(AddressingMode::ZeroPageX),
-            0xAD => self.lda(AddressingMode::Absolute),
-            0xBD => self.lda(AddressingMode::AbsoluteX),
-            0xB9 => self.lda(AddressingMode::AbsoluteY),
-            0xA1 => self.lda(AddressingMode::IndirectX),
-            0xB1 => self.lda(AddressingMode::IndirectY),
-
-            0xA2 => self.ldx(AddressingMode::Immediate),
-            0xA6 => self.ldx(AddressingMode::ZeroPage),
-            0xB6 => self.ldx(AddressingMode::ZeroPageY),
-            0xAE => self.ldx(AddressingMode::Absolute),
-            0xBE => self.ldx(AddressingMode::AbsoluteY),
-
-            0xA0 => self.ldy(AddressingMode::Immediate),
-            0xA4 => self.ldy(AddressingMode::ZeroPage),
-            0xB4 => self.ldy(AddressingMode::ZeroPageX),
-            0xAC => self.ldy(AddressingMode::Absolute),
-            0xBC => self.ldy(AddressingMode::AbsoluteX),
-
-            0x85 => self.sta(AddressingMode::ZeroPage),
-            0x95 => self.sta(AddressingMode::ZeroPageX),
-            0x8D => self.sta(AddressingMode::Absolute),
-            0x9D => self.sta(AddressingMode::AbsoluteX),
-            0x99 => self.sta(AddressingMode::AbsoluteY),
-            0x81 => self.sta(AddressingMode::IndirectX),
-            0x91 => self.sta(AddressingMode::IndirectY),
-
-            0x86 => self.stx(AddressingMode::ZeroPage),
-            0x96 => self.stx(AddressingMode::ZeroPageY),
-            0x8E => self.stx(AddressingMode::Absolute),
-
-            0x84 => self.sty(AddressingMode::ZeroPage),
-            0x94 => self.sty(AddressingMode::ZeroPageX),
-            0x8C => self.sty(AddressingMode::Absolute),
-
-            // Transfer
-            0xAA => self.tax(),
-            0xA8 => self.tay(),
-            0xBA => self.tsx(),
-            0x8A => self.txa(),
-            0x9A => self.txs(),
-            0x98 => self.tya(),
-
-            // Increment
-            0xE6 => self.inc(AddressingMode::ZeroPage),
-            0xF6 => self.inc(AddressingMode::ZeroPageX),
-            0xEE => self.inc(AddressingMode::Absolute),
-            0xFE => self.inc(AddressingMode::AbsoluteX),
-
-            0xE8 => self.inx(),
-
-            0xC8 => self.iny(),
-
-            0xC6 => self.dec(AddressingMode::ZeroPage),
-            0xD6 => self.dec(AddressingMode::ZeroPageX),
-            0xCE => self.dec(AddressingMode::Absolute),
-            0xDE => self.dec(AddressingMode::AbsoluteX),
-
-            0xCA => self.dex(),
-
-            0x88 => self.dey(),
-
-            // ALU
-            0x69 => self.adc(AddressingMode::Immediate),
-            0x65 => self.adc(AddressingMode::ZeroPage),
-            0x75 => self.adc(AddressingMode::ZeroPageX),
-            0x6D => self.adc(AddressingMode::Absolute),
-            0x7D => self.adc(AddressingMode::AbsoluteX),
-            0x79 => self.adc(AddressingMode::AbsoluteY),
-            0x61 => self.adc(AddressingMode::IndirectX),
-            0x71 => self.adc(AddressingMode::IndirectY),
-
-            0xE9 => self.sbc(AddressingMode::Immediate),
-            0xE5 => self.sbc(AddressingMode::ZeroPage),
-            0xF5 => self.sbc(AddressingMode::ZeroPageX),
-            0xED => self.sbc(AddressingMode::Absolute),
-            0xFD => self.sbc(AddressingMode::AbsoluteX),
-            0xF9 => self.sbc(AddressingMode::AbsoluteY),
-            0xE1 => self.sbc(AddressingMode::IndirectX),
-            0xF1 => self.sbc(AddressingMode::IndirectY),
-
-            0xC9 => self.cmp(AddressingMode::Immediate),
-            0xC5 => self.cmp(AddressingMode::ZeroPage),
-            0xD5 => self.cmp(AddressingMode::ZeroPageX),
-            0xCD => self.cmp(AddressingMode::Absolute),
-            0xDD => self.cmp(AddressingMode::AbsoluteX),
-            0xD9 => self.cmp(AddressingMode::AbsoluteY),
-            0xC1 => self.cmp(AddressingMode::IndirectX),
-            0xD1 => self.cmp(AddressingMode::IndirectY),
-
-            0xE0 => self.cpx(AddressingMode::Immediate),
-            0xE4 => self.cpx(AddressingMode::ZeroPage),
-            0xEC => self.cpx(AddressingMode::Absolute),
-
-            0xC0 => self.cpy(AddressingMode::Immediate),
-            0xC4 => self.cpy(AddressingMode::ZeroPage),
-            0xCC => self.cpy(AddressingMode::Absolute),
-
-            0x29 => self.and(AddressingMode::Immediate),
-            0x25 => self.and(AddressingMode::ZeroPage),
-            0x35 => self.and(AddressingMode::ZeroPageX),
-            0x2D => self.and(AddressingMode::Absolute),
-            0x3D => self.and(AddressingMode::AbsoluteX),
-            0x39 => self.and(AddressingMode::AbsoluteY),
-            0x21 => self.and(AddressingMode::IndirectX),
-            0x31 => self.and(AddressingMode::IndirectY),
-
-            0x09 => self.ora(AddressingMode::Immediate),
-            0x05 => self.ora(AddressingMode::ZeroPage),
-            0x15 => self.ora(AddressingMode::ZeroPageX),
-            0x0D => self.ora(AddressingMode::Absolute),
-            0x1D => self.ora(AddressingMode::AbsoluteX),
-            0x19 => self.ora(AddressingMode::AbsoluteY),
-            0x01 => self.ora(AddressingMode::IndirectX),
-            0x11 => self.ora(AddressingMode::IndirectY),
-
-            0x49 => self.eor(AddressingMode::Immediate),
-            0x45 => self.eor(AddressingMode::ZeroPage),
-            0x55 => self.eor(AddressingMode::ZeroPageX),
-            0x4D => self.eor(AddressingMode::Absolute),
-            0x5D => self.eor(AddressingMode::AbsoluteX),
-            0x59 => self.eor(AddressingMode::AbsoluteY),
-            0x41 => self.eor(AddressingMode::IndirectX),
-            0x51 => self.eor(AddressingMode::IndirectY),
-
-            0x24 => self.bit(AddressingMode::ZeroPage),
-            0x2C => self.bit(AddressingMode::Absolute),
-
-            0x0A => self.asl(AddressingMode::Accumulator),
-            0x06 => self.asl(AddressingMode::ZeroPage),
-            0x16 => self.asl(AddressingMode::ZeroPageX),
-            0x0E => self.asl(AddressingMode::Absolute),
-            0x1E => self.asl(AddressingMode::AbsoluteX),
-
-            0x4A => self.lsr(AddressingMode::Accumulator),
-            0x46 => self.lsr(AddressingMode::ZeroPage),
-            0x56 => self.lsr(AddressingMode::ZeroPageX),
-            0x4E => self.lsr(AddressingMode::Absolute),
-            0x5E => self.lsr(AddressingMode::AbsoluteX),
-
-            0x2A => self.rol(AddressingMode::Accumulator),
-            0x26 => self.rol(AddressingMode::ZeroPage),
-            0x36 => self.rol(AddressingMode::ZeroPageX),
-            0x2E => self.rol(AddressingMode::Absolute),
-            0x3E => self.rol(AddressingMode::AbsoluteX),
-
-            0x6A => self.ror(AddressingMode::Accumulator),
-            0x66 => self.ror(AddressingMode::ZeroPage),
-            0x76 => self.ror(AddressingMode::ZeroPageX),
-            0x6E => self.ror(AddressingMode::Absolute),
-            0x7E => self.ror(AddressingMode::AbsoluteX),
-
-            0x4C => self.jmp(AddressingMode::Absolute),
-            0x6C => self.jmp(AddressingMode::Indirect),
-
-            // Flag
-            0x18 => self.clc(),
-            0xD8 => self.cld(),
-            0x58 => self.cli(),
-            0xB8 => self.clv(),
-            0x38 => self.sec(),
-            0xF8 => self.sed(),
-            0x78 => self.sei(),
-
-            // Branching
-            0xF0 => self.beq(),
-            0xD0 => self.bne(),
-            0x90 => self.bcc(),
-            0xB0 => self.bcs(),
-            0x50 => self.bvc(),
-            0x70 => self.bvs(),
-            0x30 => self.bmi(),
-            0x10 => self.bpl(),
-
-            // Stack
-            0x48 => self.pha(),
-            0x68 => self.pla(),
-            0x08 => self.php(),
-            0x28 => self.plp(),
-            0x20 => self.jsr(),
-            0x60 => self.rts(),
-
-            0x00 => self.brk(),
-            0x40 => self.rti(),
-
-            // NOP Instruction
-            0xEA => (),
-
-            _ => panic!("This opcode is not supposed to be used."),
+        match opcode.instruction {
+            Instruction::LDA => self.lda(opcode.mode),
+            Instruction::LDX => self.ldx(opcode.mode),
+            Instruction::LDY => self.ldy(opcode.mode),
+            Instruction::STA => self.sta(opcode.mode),
+            Instruction::STX => self.stx(opcode.mode),
+            Instruction::STY => self.sty(opcode.mode),
+            Instruction::TAX => self.tax(),
+            Instruction::TAY => self.tay(),
+            Instruction::TSX => self.tsx(),
+            Instruction::TXA => self.txa(),
+            Instruction::TXS => self.txs(),
+            Instruction::TYA => self.tya(),
+            Instruction::INC => self.inc(opcode.mode),
+            Instruction::INX => self.inx(),
+            Instruction::INY => self.iny(),
+            Instruction::DEC => self.dec(opcode.mode),
+            Instruction::DEX => self.dex(),
+            Instruction::DEY => self.dey(),
+            Instruction::ADC => self.adc(opcode.mode),
+            Instruction::SBC => self.sbc(opcode.mode),
+            Instruction::CMP => self.cmp(opcode.mode),
+            Instruction::CPX => self.cpx(opcode.mode),
+            Instruction::CPY => self.cpy(opcode.mode),
+            Instruction::AND => self.and(opcode.mode),
+            Instruction::ORA => self.ora(opcode.mode),
+            Instruction::EOR => self.eor(opcode.mode),
+            Instruction::BIT => self.bit(opcode.mode),
+            Instruction::ASL => self.asl(opcode.mode),
+            Instruction::LSR => self.lsr(opcode.mode),
+            Instruction::ROL => self.rol(opcode.mode),
+            Instruction::ROR => self.ror(opcode.mode),
+            Instruction::JMP => self.jmp(opcode.mode),
+            Instruction::CLC => self.clc(),
+            Instruction::CLD => self.cld(),
+            Instruction::CLI => self.cli(),
+            Instruction::CLV => self.clv(),
+            Instruction::SEC => self.sec(),
+            Instruction::SED => self.sed(),
+            Instruction::SEI => self.sei(),
+            Instruction::BEQ => self.beq(),
+            Instruction::BNE => self.bne(),
+            Instruction::BCC => self.bcc(),
+            Instruction::BCS => self.bcs(),
+            Instruction::BVC => self.bvc(),
+            Instruction::BVS => self.bvs(),
+            Instruction::BMI => self.bmi(),
+            Instruction::BPL => self.bpl(),
+            Instruction::PHA => self.pha(),
+            Instruction::PLA => self.pla(),
+            Instruction::PHP => self.php(),
+            Instruction::PLP => self.plp(),
+            Instruction::JSR => self.jsr(),
+            Instruction::RTS => self.rts(),
+            Instruction::BRK => self.brk(),
+            Instruction::RTI => self.rti(),
+            Instruction::NOP => {},
         }
     }
 }
